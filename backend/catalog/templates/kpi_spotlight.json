@@ -1,0 +1,28 @@
+{
+  "template_id": "kpi_spotlight",
+  "display_name": "KPI Spotlight",
+  "description": "Ad hoc single-KPI deep-dive report. User selects any KPI from the catalog.",
+  "domain": "any",
+  "required_kpis": [],
+  "optional_kpis": ["__any__"],
+  "required_dimensions": ["date"],
+  "optional_dimensions": ["agent_id", "site", "campaign"],
+  "charts": [
+    {
+      "chart_id": "kpi_trend",
+      "type": "line",
+      "title": "{kpi_display_name} — Trend",
+      "kpi": "__selected__",
+      "x_axis": "date",
+      "y_format": "__kpi_format__"
+    },
+    {
+      "chart_id": "kpi_breakdown",
+      "type": "bar",
+      "title": "{kpi_display_name} by {dimension}",
+      "kpi": "__selected__",
+      "x_axis": "__selected_dimension__",
+      "y_format": "__kpi_format__"
+    }
+  ]
+}

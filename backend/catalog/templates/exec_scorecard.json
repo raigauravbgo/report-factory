@@ -1,0 +1,43 @@
+{
+  "template_id": "exec_scorecard",
+  "display_name": "Executive Scorecard",
+  "description": "Monthly executive-level scorecard covering workforce, utilisation, and high-level operational KPIs",
+  "domain": "workforce",
+  "required_kpis": ["login_hours", "productive_hours", "paid_hours", "paid_hours_workday", "pause_hours", "occupancy_rate"],
+  "optional_kpis": ["csat_score", "qa_score", "net_collected"],
+  "required_dimensions": ["date"],
+  "optional_dimensions": ["site", "agent_id"],
+  "charts": [
+    {
+      "chart_id": "workforce_kpi_tiles",
+      "type": "kpi_card",
+      "title": "Workforce Summary",
+      "kpis": ["login_hours", "productive_hours", "paid_hours", "occupancy_rate"],
+      "y_format": "mixed"
+    },
+    {
+      "chart_id": "hours_breakdown",
+      "type": "bar",
+      "title": "Hours Breakdown by Type",
+      "kpis": ["login_hours", "productive_hours", "pause_hours"],
+      "x_axis": "date",
+      "y_format": "duration"
+    },
+    {
+      "chart_id": "occupancy_trend",
+      "type": "line",
+      "title": "Occupancy Rate — Monthly Trend",
+      "kpi": "occupancy_rate",
+      "x_axis": "date",
+      "y_format": "percentage"
+    },
+    {
+      "chart_id": "site_breakdown",
+      "type": "bar",
+      "title": "Login Hours by Site",
+      "kpi": "login_hours",
+      "x_axis": "site",
+      "y_format": "duration"
+    }
+  ]
+}
