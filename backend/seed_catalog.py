@@ -28,19 +28,24 @@ def seed() -> None:
             conn.execute(
                 """INSERT INTO kpi_catalog
                    (kpi_id, display_name, description, numerator, denominator,
-                    format, domain, expected_range, aliases, source_fields, reviewed)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    format, domain, expected_range, aliases, source_fields,
+                    required_columns, formula, chart_type, unit, reviewed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     kpi["kpi_id"],
                     kpi["display_name"],
                     kpi.get("description", ""),
-                    kpi["numerator"],
-                    kpi["denominator"],
-                    kpi["format"],
-                    kpi["domain"],
+                    kpi.get("numerator", ""),
+                    kpi.get("denominator", "_none_"),
+                    kpi.get("format", "integer"),
+                    kpi.get("domain", "ops"),
                     json.dumps(kpi.get("expected_range")) if kpi.get("expected_range") else None,
                     json.dumps(kpi.get("aliases", [])),
                     json.dumps(kpi.get("source_fields", [])),
+                    json.dumps(kpi.get("required_columns", [])),
+                    kpi.get("formula", ""),
+                    kpi.get("chart_type", "bar"),
+                    kpi.get("unit", ""),
                     1 if kpi.get("reviewed") else 0,
                 ),
             )

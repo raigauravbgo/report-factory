@@ -1,0 +1,85 @@
+kpis:
+  - id: total_calls
+    name: Total Calls
+    description: Total number of call records in the dataset
+    category: call_data
+    required_columns: [call_id]
+    formula: count(*)
+    chart_type: card
+
+  - id: call_volume_trend
+    name: Call Volume Trend
+    description: Number of calls per day over the reporting period
+    category: call_data
+    required_columns: [call_id, date]
+    formula: count_by_date
+    chart_type: line
+
+  - id: avg_handle_time
+    name: Average Handle Time (AHT)
+    description: Mean call handle time across all calls
+    category: call_data
+    required_columns: [handle_time]
+    formula: avg(handle_time)
+    unit: "sec"
+    chart_type: card
+
+  - id: avg_wait_time
+    name: Average Wait Time
+    description: Mean time customers waited before being connected
+    category: call_data
+    required_columns: [wait_time]
+    formula: avg(wait_time)
+    unit: "sec"
+    chart_type: card
+
+  - id: abandon_rate
+    name: Abandon Rate
+    description: Percentage of calls that were abandoned before connection
+    category: call_data
+    required_columns: [abandon_flag]
+    formula: rate(abandon_flag)
+    unit: "%"
+    chart_type: card
+
+  - id: calls_by_disposition
+    name: Calls by Disposition
+    description: Call volume breakdown by outcome/disposition
+    category: call_data
+    required_columns: [call_id, disposition]
+    formula: count_by(disposition)
+    chart_type: bar
+
+  - id: calls_by_direction
+    name: Inbound vs Outbound
+    description: Split of calls by direction (inbound / outbound)
+    category: call_data
+    required_columns: [call_id, direction]
+    formula: count_by(direction)
+    chart_type: pie
+
+  - id: calls_by_queue
+    name: Calls by Queue
+    description: Call volume distribution across queues
+    category: call_data
+    required_columns: [call_id, queue_name]
+    formula: count_by(queue_name)
+    chart_type: bar
+
+  - id: aht_by_agent
+    name: AHT by Agent
+    description: Average handle time per agent
+    category: call_data
+    required_columns: [agent_id, handle_time]
+    formula: avg_by(agent_id, handle_time)
+    unit: "sec"
+    chart_type: bar
+
+  - id: call_duration_by_agent
+    name: Total Talk Time by Agent
+    description: Sum of call duration per agent
+    category: call_data
+    required_columns: [agent_id, duration]
+    formula: sum_by(agent_id, duration)
+    unit: "sec"
+    chart_type: bar

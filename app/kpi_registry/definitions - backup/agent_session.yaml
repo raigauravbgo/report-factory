@@ -1,0 +1,60 @@
+kpis:
+  - id: total_sessions
+    name: Total Agent Sessions
+    description: Total number of agent login sessions recorded
+    category: agent_session
+    required_columns: [session_id]
+    formula: count(*)
+    chart_type: card
+
+  - id: avg_session_duration
+    name: Average Session Duration
+    description: Mean duration of agent sessions
+    category: agent_session
+    required_columns: [session_duration]
+    formula: avg(session_duration)
+    unit: "min"
+    chart_type: card
+
+  - id: sessions_by_agent
+    name: Sessions per Agent
+    description: Number of login sessions per agent
+    category: agent_session
+    required_columns: [agent_id, session_id]
+    formula: count_by(agent_id)
+    chart_type: bar
+
+  - id: session_duration_by_agent
+    name: Total Session Time by Agent
+    description: Cumulative logged-in time per agent
+    category: agent_session
+    required_columns: [agent_id, session_duration]
+    formula: sum_by(agent_id, session_duration)
+    unit: "min"
+    chart_type: bar
+
+  - id: sessions_trend
+    name: Daily Session Count
+    description: Number of agent sessions per day
+    category: agent_session
+    required_columns: [session_id, date]
+    formula: count_by_date
+    chart_type: line
+
+  - id: avg_break_duration
+    name: Average Break Duration
+    description: Mean break time per session
+    category: agent_session
+    required_columns: [break_duration]
+    formula: avg(break_duration)
+    unit: "min"
+    chart_type: card
+
+  - id: break_time_by_agent
+    name: Total Break Time by Agent
+    description: Cumulative break time per agent
+    category: agent_session
+    required_columns: [agent_id, break_duration]
+    formula: sum_by(agent_id, break_duration)
+    unit: "min"
+    chart_type: bar

@@ -1,0 +1,19 @@
+backedn - cd D:\dashboard\backend
+D:\dashboard\env\Scripts\uvicorn.exe main:app --host 0.0.0.0 --port 8000 --reload
+
+frontend -
+npm run dev
+
+
+To run the app:
+
+Backend:
+
+
+cd d:\dashboard\backend
+uvicorn main:app --reload
+Frontend:
+
+
+cd d:\dashboard\report-factory-master\frontend
+npx next dev

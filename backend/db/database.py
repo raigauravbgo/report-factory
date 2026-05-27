@@ -22,7 +22,7 @@ def init_db() -> None:
 
 def _deserialise_kpi(row: sqlite3.Row) -> dict:
     d = dict(row)
-    for field in ("expected_range", "aliases", "source_fields"):
+    for field in ("expected_range", "aliases", "source_fields", "required_columns"):
         raw = d.get(field)
         d[field] = json.loads(raw) if raw else ([] if field != "expected_range" else None)
     d["reviewed"] = bool(d.get("reviewed", 0))
@@ -33,21 +33,26 @@ def create_kpi(kpi: dict) -> dict:
     """Insert a new KPI into the catalog. reviewed=False by default (user-defined)."""
     with get_conn() as conn:
         conn.execute(
-            """INSERT INTO kpi_catalog
+            """INSERT OR REPLACE INTO kpi_catalog
                (kpi_id, display_name, description, numerator, denominator,
-                format, domain, expected_range, aliases, source_fields, reviewed)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                format, domain, expected_range, aliases, source_fields,
+                required_columns, formula, chart_type, unit, reviewed)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 kpi["kpi_id"],
                 kpi["display_name"],
                 kpi.get("description", ""),
-                kpi["numerator"],
-                kpi["denominator"],
-                kpi["format"],
-                kpi["domain"],
+                kpi.get("numerator", ""),
+                kpi.get("denominator", "_none_"),
+                kpi.get("format", "integer"),
+                kpi.get("domain", "ops"),
                 json.dumps(kpi["expected_range"]) if kpi.get("expected_range") else None,
                 json.dumps(kpi.get("aliases", [])),
                 json.dumps(kpi.get("source_fields", [])),
+                json.dumps(kpi.get("required_columns", [])),
+                kpi.get("formula", ""),
+                kpi.get("chart_type", "bar"),
+                kpi.get("unit", ""),
                 1 if kpi.get("reviewed") else 0,
             ),
         )

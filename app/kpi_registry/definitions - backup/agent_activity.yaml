@@ -1,0 +1,69 @@
+kpis:
+  - id: activity_type_breakdown
+    name: Activity Type Breakdown
+    description: Distribution of activity records across activity types
+    category: agent_activity
+    required_columns: [activity_type]
+    formula: count_by(activity_type)
+    chart_type: pie
+
+  - id: time_by_activity
+    name: Time Spent per Activity Type
+    description: Total duration spent in each activity type
+    category: agent_activity
+    required_columns: [activity_type, duration]
+    formula: sum_by(activity_type, duration)
+    unit: "min"
+    chart_type: bar
+
+  - id: activity_time_by_agent
+    name: Total Activity Time by Agent
+    description: Cumulative activity duration per agent
+    category: agent_activity
+    required_columns: [agent_id, duration]
+    formula: sum_by(agent_id, duration)
+    unit: "min"
+    chart_type: bar
+
+  - id: status_distribution
+    name: Agent Status Distribution
+    description: Breakdown of time spent in each agent status
+    category: agent_activity
+    required_columns: [status]
+    formula: count_by(status)
+    chart_type: pie
+
+  - id: avg_activity_duration
+    name: Average Activity Duration
+    description: Mean duration of individual activity events
+    category: agent_activity
+    required_columns: [duration]
+    formula: avg(duration)
+    unit: "min"
+    chart_type: card
+
+  - id: activity_trend
+    name: Daily Activity Volume
+    description: Number of activity records per day
+    category: agent_activity
+    required_columns: [date]
+    formula: count_by_date
+    chart_type: line
+
+  - id: avg_duration_by_activity
+    name: Avg Duration per Activity Type
+    description: Mean duration for each type of activity
+    category: agent_activity
+    required_columns: [activity_type, duration]
+    formula: avg_by(activity_type, duration)
+    unit: "min"
+    chart_type: bar
+
+  - id: activity_by_agent_type
+    name: Activity Breakdown by Agent
+    description: Average time per activity type per agent
+    category: agent_activity
+    required_columns: [agent_id, duration]
+    formula: avg_by(agent_id, duration)
+    unit: "min"
+    chart_type: bar

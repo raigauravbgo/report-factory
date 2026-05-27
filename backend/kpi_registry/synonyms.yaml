@@ -1,0 +1,537 @@
+# Column synonym map — canonical_name: [list of common variants]
+# When an uploaded file has a column matching any variant, it is treated
+# as the canonical name for both KPI feasibility and computation.
+
+synonyms:
+
+  # ── Universal ─────────────────────────────────────────────────────────────
+
+  date:
+    - call_date
+    - session_date
+    - activity_date
+    - log_date
+    - record_date
+    - event_date
+    - report_date
+    - work_date
+    - transaction_date
+    - sale_date
+    - order_date
+    - purchase_date
+    - invoice_date
+    - ship_date
+    - entry_date
+
+  # ── Collections / Call Centre ─────────────────────────────────────────────
+
+  call_id:
+    - call_number
+    - call_no
+    - call_ref
+    - interaction_id
+    - record_id
+    - call_identifier
+
+  agent_id:
+    - agent_name
+    - agent
+    - agent_code
+    - emp_id
+    - employee_id
+    - user_id
+    - username
+    - staff_id
+    - rep_id
+    - representative
+    - sales_agent_id
+    - sales_agent
+    - sales_agent_code
+    - advisor_id
+
+  call_timestamp:
+    - timestamp
+    - call_time
+    - call_datetime
+    - datetime
+    - call_start
+    - start_time
+    - start_datetime
+    - call_start_time
+
+  disposition:
+    - call_result
+    - outcome
+    - call_outcome
+    - call_status
+    - result
+    - final_disposition
+    - contact_result
+
+  is_rpc:
+    - rpc
+    - right_party_contact
+    - rpc_flag
+    - right_party
+    - is_right_party
+
+  is_ptp:
+    - ptp
+    - promise_to_pay
+    - ptp_flag
+    - has_ptp
+    - payment_promise
+
+  direction:
+    - call_direction
+    - call_type
+    - inbound_outbound
+    - traffic_type
+
+  dial_type:
+    - dialler_type
+    - dial_method
+    - dial_mode
+    - dialing_type
+
+  campaign_name:
+    - campaign
+    - campaign_id
+    - campaign_code
+    - list_name
+    - list_id
+    - dialler_list
+    - marketing_campaign
+    - promo_campaign
+    - campaign_title
+
+  region:
+    - province
+    - state
+    - area
+    - territory
+    - zone
+    - geography
+
+  queue_name:
+    - queue
+    - skill
+    - skill_group
+    - skill_name
+    - team
+
+  handle_time:
+    - call_duration
+    - talk_time
+    - handle_duration
+    - duration_sec
+    - duration_min
+    - call_length
+    - handling_time
+    - total_duration
+
+  wait_time:
+    - queue_time
+    - hold_time
+    - wait_duration
+    - time_in_queue
+    - ring_time
+    - delay
+
+  abandon_flag:
+    - abandoned
+    - is_abandoned
+    - call_abandoned
+
+  # ── Work Avoidance ────────────────────────────────────────────────────────
+
+  avoidance_duration:
+    - avoidance_time
+    - avoid_time
+    - avoidance_minutes
+    - time_avoided
+    - work_avoidance
+
+  login_time:
+    - logged_in_time
+    - total_login
+    - shift_duration
+    - login_duration
+    - total_logged_in
+
+  idle_time:
+    - idle_duration
+    - idle_minutes
+    - not_working_time
+    - inactive_time
+
+  not_ready_time:
+    - not_ready_duration
+    - unavailable_time
+    - nr_time
+    - not_available_time
+
+  acw_time:
+    - after_call_work
+    - acw_duration
+    - wrap_up_time
+    - wrap_time
+    - post_call_work
+    - acw
+
+  avoidance_reason:
+    - avoidance_type
+    - avoidance_category
+    - avoid_reason
+    - avoidance_code
+
+  # ── Agent Session ─────────────────────────────────────────────────────────
+
+  session_id:
+    - session
+    - login_id
+    - session_no
+    - session_ref
+    - login_session
+
+  session_duration:
+    - session_time
+    - login_duration_min
+    - total_session_time
+    - session_length
+    - logged_in_minutes
+
+  break_duration:
+    - break_time
+    - total_break
+    - break_minutes
+    - rest_time
+
+  # ── Agent Activity ────────────────────────────────────────────────────────
+
+  activity_type:
+    - activity
+    - activity_name
+    - activity_category
+    - task_type
+    - event_type
+
+  status:
+    - agent_status
+    - current_status
+    - agent_state
+    - presence
+
+  duration:
+    - time_in_state
+    - activity_duration
+    - duration_seconds
+    - duration_minutes
+    - elapsed_time
+    - time_spent
+
+  # ── Agent Summary ─────────────────────────────────────────────────────────
+
+  total_calls:
+    - calls_handled
+    - call_count
+    - num_calls
+    - total_handled
+    - calls
+
+  aht:
+    - avg_handle_time
+    - average_handle_time
+    - mean_handle_time
+    - average_aht
+
+  utilization_rate:
+    - utilization
+    - util_rate
+    - occupancy
+    - occupancy_rate
+    - utilisation
+
+  adherence_score:
+    - adherence
+    - schedule_adherence
+    - compliance
+    - adherence_pct
+
+  total_talk_time:
+    - total_talk
+    - talk_duration
+    - total_talk_minutes
+
+  # ── Dialler ───────────────────────────────────────────────────────────────
+
+  dial_id:
+    - dialler_id
+    - dial_record_id
+    - attempt_id
+    - dial_attempt_id
+    - dial_ref
+
+  connected_flag:
+    - connected
+    - is_connected
+    - contact_made
+    - call_connected
+
+  dropped_flag:
+    - is_dropped
+    - call_dropped
+    - auto_drop
+
+  dial_result:
+    - dial_outcome
+    - dialler_result
+    - attempt_result
+    - dial_disposition
+
+  # ── Revenue (B2B) ─────────────────────────────────────────────────────────
+
+  revenue_amount:
+    - revenue
+    - sales
+    - total_sales
+    - sale_amount
+    - net_sales
+    - net_revenue
+    - net_revenue_amount
+    - gross_sales
+    - sales_amount
+    - total_amount
+    - invoice_amount
+    - order_total
+    - sales_value
+    - turnover
+    - amount
+    - payment
+    - collection_amount
+    - payment_amount
+    - collected
+
+  client_id:
+    - account_id
+    - debtor_id
+    - account_number
+
+  variable_cost:
+    - cost
+    - variable_costs
+    - expenses
+    - cost_amount
+    - cogs
+    - cost_of_goods_sold
+    - total_cost
+
+  segment:
+    - portfolio
+    - business_unit
+    - division
+    - client_segment
+    - customer_segment
+    - customer_type
+    - market_segment
+    - client_type
+
+  # ── Retail Sales ──────────────────────────────────────────────────────────
+
+  order_id:
+    - transaction_id
+    - order_number
+    - invoice_id
+    - invoice_number
+    - sale_id
+    - receipt_id
+    - transaction_number
+    - order_no
+    - order_ref
+
+  quantity:
+    - units_sold
+    - qty
+    - units
+    - quantity_sold
+    - num_units
+    - items_sold
+    - qty_sold
+    - pieces
+    - no_of_units
+
+  unit_price:
+    - price
+    - selling_price
+    - sale_price
+    - price_per_unit
+    - retail_price
+    - list_price
+    - item_price
+    - unit_selling_price
+
+  product_name:
+    - product
+    - product_id
+    - sku
+    - item
+    - item_name
+    - product_code
+    - product_description
+    - product_desc
+    - item_description
+    - item_code
+    - article
+    - article_name
+
+  category:
+    - product_category
+    - department
+    - product_type
+    - item_category
+    - item_type
+    - cat
+    - product_group
+    - merchandise_category
+
+  store_name:
+    - store
+    - store_id
+    - location
+    - outlet
+    - branch
+    - shop
+    - store_code
+    - store_number
+
+  customer_id:
+    - customer_name
+    - customer
+    - buyer
+    - buyer_id
+    - client_name
+    - consumer_id
+    - shopper_id
+
+  profit:
+    - profit_amount
+    - gross_profit
+    - net_profit
+    - margin_amount
+    - earnings
+    - profit_value
+    - gross_margin
+    - gross_margin_amount
+    - margin
+
+  discount:
+    - discount_amount
+    - promotion
+    - coupon
+    - markdown
+    - rebate
+    - discount_value
+    - net_discount
+
+  payment_method:
+    - payment_type
+    - pay_method
+    - tender_type
+    - mode_of_payment
+
+  salesperson:
+    - sales_rep
+    - sales_agent
+    - sales_staff
+    - salesman
+    - saleswoman
+    - sales_executive
+
+  # ── Advanced Sales ────────────────────────────────────────────────────────
+
+  gross_revenue:
+    - gross_sales_amount
+    - revenue_before_discount
+    - gross_revenue_amount
+    - total_gross_sales
+    - gross_income
+
+  discount_pct:
+    - discount_percent
+    - discount_percentage
+    - pct_discount
+    - discount_rate
+    - discount_%
+
+  order_status:
+    - transaction_status
+    - fulfillment_status
+    - order_fulfillment_status
+    - order_state
+    - shipment_status
+    - delivery_status
+
+  channel:
+    - sales_channel
+    - channel_type
+    - order_channel
+    - purchase_channel
+    - medium
+    - platform
+    - sales_medium
+
+  country:
+    - country_name
+    - nation
+    - country_code
+    - ship_country
+    - billing_country
+
+  city:
+    - city_name
+    - town
+    - municipality
+    - ship_city
+    - billing_city
+
+  product_subcategory:
+    - sub_category
+    - subcategory
+    - product_sub_category
+    - sub_cat
+    - item_subcategory
+    - product_sub_type
+
+  delivery_days:
+    - shipping_days
+    - days_to_deliver
+    - fulfillment_days
+    - lead_time
+    - transit_days
+    - days_in_transit
+    - ship_days
+
+  customer_rating:
+    - rating
+    - review_score
+    - satisfaction_score
+    - csat_score
+    - nps_score
+    - stars
+    - customer_score
+    - review_rating
+
+  return_flag:
+    - is_returned
+    - returned
+    - has_return
+    - is_return
+    - refunded
+    - is_refund
+    - return_indicator
+
+  currency:
+    - currency_code
+    - transaction_currency
+    - invoice_currency
+    - ccy

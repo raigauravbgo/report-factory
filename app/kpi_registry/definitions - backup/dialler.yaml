@@ -1,0 +1,75 @@
+kpis:
+  - id: total_dial_attempts
+    name: Total Dial Attempts
+    description: Total number of dial attempts made
+    category: dialler
+    required_columns: [dial_id]
+    formula: count(*)
+    chart_type: card
+
+  - id: connect_rate
+    name: Connect Rate
+    description: Percentage of dial attempts that resulted in a connection
+    category: dialler
+    required_columns: [connected_flag]
+    formula: rate(connected_flag)
+    unit: "%"
+    chart_type: card
+
+  - id: dialler_rpc_rate
+    name: Right Party Contact Rate
+    description: Percentage of dials that reached the right party
+    category: dialler
+    required_columns: [is_rpc]
+    formula: rate(is_rpc)
+    unit: "%"
+    chart_type: card
+
+  - id: drop_rate
+    name: Drop Rate
+    description: Percentage of auto-dialler calls dropped before agent connection
+    category: dialler
+    required_columns: [dropped_flag]
+    formula: rate(dropped_flag)
+    unit: "%"
+    chart_type: card
+
+  - id: dials_by_campaign
+    name: Dials by Campaign
+    description: Dial attempt volume per campaign
+    category: dialler
+    required_columns: [dial_id, campaign_name]
+    formula: count_by(campaign_name)
+    chart_type: bar
+
+  - id: dials_by_result
+    name: Dials by Result
+    description: Breakdown of dial attempts by outcome/result
+    category: dialler
+    required_columns: [dial_id, dial_result]
+    formula: count_by(dial_result)
+    chart_type: bar
+
+  - id: dials_trend
+    name: Daily Dial Volume Trend
+    description: Number of dial attempts per day
+    category: dialler
+    required_columns: [dial_id, date]
+    formula: count_by_date
+    chart_type: line
+
+  - id: dials_by_type
+    name: Manual vs Auto Dial
+    description: Split of dials by dial type (manual / auto / preview)
+    category: dialler
+    required_columns: [dial_id, dial_type]
+    formula: count_by(dial_type)
+    chart_type: pie
+
+  - id: dials_by_agent
+    name: Dial Attempts by Agent
+    description: Total dial volume per agent
+    category: dialler
+    required_columns: [agent_id, dial_id]
+    formula: count_by(agent_id)
+    chart_type: bar

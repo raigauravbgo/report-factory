@@ -1,0 +1,46 @@
+INFO:     Will watch for changes in these directories: ['D:\\dashboard\\backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [9264] using WatchFiles
+INFO:     Started server process [10976]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+D:\dashboard\backend\services\profiler.py:98: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  parsed = pd.to_datetime(sample, errors="coerce")
+WARNING:  WatchFiles detected changes in 'api\routes\upload.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [10976]
+INFO:     Started server process [316]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.

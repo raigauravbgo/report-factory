@@ -1,0 +1,70 @@
+kpis:
+  - id: calls_per_agent
+    name: Calls Handled per Agent
+    description: Total calls handled broken down by agent
+    category: agent_summary
+    required_columns: [agent_id, total_calls]
+    formula: sum_by(agent_id, total_calls)
+    chart_type: bar
+
+  - id: aht_per_agent_summary
+    name: Average Handle Time by Agent
+    description: Mean handle time per agent from the summary report
+    category: agent_summary
+    required_columns: [agent_id, aht]
+    formula: avg_by(agent_id, aht)
+    unit: "sec"
+    chart_type: bar
+
+  - id: utilization_by_agent
+    name: Agent Utilization Rate
+    description: Percentage of logged-in time spent handling calls per agent
+    category: agent_summary
+    required_columns: [agent_id, utilization_rate]
+    formula: avg_by(agent_id, utilization_rate)
+    unit: "%"
+    chart_type: bar
+
+  - id: adherence_by_agent
+    name: Schedule Adherence by Agent
+    description: Schedule adherence score per agent
+    category: agent_summary
+    required_columns: [agent_id, adherence_score]
+    formula: avg_by(agent_id, adherence_score)
+    unit: "%"
+    chart_type: bar
+
+  - id: talk_time_by_agent
+    name: Total Talk Time by Agent
+    description: Cumulative talk time per agent
+    category: agent_summary
+    required_columns: [agent_id, total_talk_time]
+    formula: sum_by(agent_id, total_talk_time)
+    unit: "min"
+    chart_type: bar
+
+  - id: avg_utilization
+    name: Average Utilization Rate
+    description: Mean utilization rate across all agents
+    category: agent_summary
+    required_columns: [utilization_rate]
+    formula: avg(utilization_rate)
+    unit: "%"
+    chart_type: card
+
+  - id: avg_adherence
+    name: Average Schedule Adherence
+    description: Mean schedule adherence score across all agents
+    category: agent_summary
+    required_columns: [adherence_score]
+    formula: avg(adherence_score)
+    unit: "%"
+    chart_type: card
+
+  - id: performance_trend
+    name: Daily Performance Trend
+    description: Number of agent summary records per day
+    category: agent_summary
+    required_columns: [date]
+    formula: count_by_date
+    chart_type: line

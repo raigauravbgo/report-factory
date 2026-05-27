@@ -9,27 +9,39 @@ services:
       - .env
     volumes:
       - ./backend:/app
-    depends_on:
-      mysql:
-        condition: service_healthy
+      - ./local_uploads:/local_uploads
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    # MySQL is optional — set DATABASE_URL in .env to enable it.
+    # Without MySQL, SQLite (dev.db) is used automatically.
 
-  mysql:
-    image: mysql:8.0
+  frontend:
+    build:
+      context: ./report-factory-master/frontend
+      dockerfile: Dockerfile
     ports:
-      - "3306:3306"
+      - "3000:3000"
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      NEXT_PUBLIC_API_URL: http://api:8000
+    depends_on:
+      - api
+
+  # Optional: enable MySQL for production-grade persistence
+  # mysql:
+  #   image: mysql:8.0
+  #   ports:
+  #     - "3306:3306"
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+  #     MYSQL_DATABASE: ${MYSQL_DATABASE}
+  #     MYSQL_USER: ${MYSQL_USER}
+  #     MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+  #   volumes:
+  #     - mysql_data:/var/lib/mysql
+  #   healthcheck:
+  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
 
 volumes:
   mysql_data:

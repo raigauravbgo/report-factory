@@ -1,0 +1,32 @@
+kpis:
+  - id: record_count
+    name: Total Records
+    description: Total number of records in the uploaded dataset
+    category: generic
+    required_columns: []
+    formula: count(*)
+    chart_type: card
+
+  - id: date_range
+    name: Date Range
+    description: Time span covered by the dataset
+    category: generic
+    required_columns: [date]
+    formula: min_max_date
+    chart_type: card
+
+  - id: daily_volume
+    name: Daily Volume
+    description: Record count per day
+    category: generic
+    required_columns: [date]
+    formula: count_by_date
+    chart_type: line
+
+  - id: segment_breakdown
+    name: Segment Breakdown
+    description: Distribution of records across categorical segments
+    category: generic
+    required_columns: [segment]
+    formula: count_by_segment
+    chart_type: pie

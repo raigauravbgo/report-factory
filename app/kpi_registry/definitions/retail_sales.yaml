@@ -1,0 +1,190 @@
+kpis:
+  - id: total_sales_revenue
+    name: Total Sales Revenue
+    description: Sum of all sales revenue in the selected period
+    category: retail_sales
+    required_columns: [revenue_amount]
+    formula: sum(revenue_amount)
+    unit: "$"
+    chart_type: card
+
+  - id: sales_revenue_trend
+    name: Sales Revenue Trend
+    description: Daily sales revenue over time
+    category: retail_sales
+    required_columns: [date, revenue_amount]
+    formula: sum_col_by_date(revenue_amount)
+    unit: "$"
+    chart_type: line
+
+  - id: total_units_sold
+    name: Total Units Sold
+    description: Total quantity of items sold
+    category: retail_sales
+    required_columns: [quantity]
+    formula: sum(quantity)
+    chart_type: card
+
+  - id: total_orders
+    name: Total Orders
+    description: Total number of orders or transactions
+    category: retail_sales
+    required_columns: [order_id]
+    formula: count(*)
+    chart_type: card
+
+  - id: avg_order_value
+    name: Average Order Value
+    description: Mean revenue per order
+    category: retail_sales
+    required_columns: [revenue_amount]
+    formula: avg(revenue_amount)
+    unit: "$"
+    chart_type: card
+
+  - id: order_volume_trend
+    name: Order Volume Trend
+    description: Number of orders per day over time
+    category: retail_sales
+    required_columns: [order_id, date]
+    formula: count_by_date
+    chart_type: line
+
+  - id: sales_by_category
+    name: Sales by Category
+    description: Revenue breakdown by product category
+    category: retail_sales
+    required_columns: [category, revenue_amount]
+    formula: sum_by(category, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: sales_by_product
+    name: Top Products by Revenue
+    description: Revenue contribution per product
+    category: retail_sales
+    required_columns: [product_name, revenue_amount]
+    formula: sum_by(product_name, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: units_by_product
+    name: Units Sold by Product
+    description: Quantity sold per product
+    category: retail_sales
+    required_columns: [product_name, quantity]
+    formula: sum_by(product_name, quantity)
+    chart_type: bar
+
+  - id: units_by_category
+    name: Units Sold by Category
+    description: Quantity sold per product category
+    category: retail_sales
+    required_columns: [category, quantity]
+    formula: sum_by(category, quantity)
+    chart_type: bar
+
+  - id: sales_by_region
+    name: Sales by Region
+    description: Revenue breakdown by geographic region
+    category: retail_sales
+    required_columns: [region, revenue_amount]
+    formula: sum_by(region, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: sales_by_store
+    name: Sales by Store
+    description: Revenue contribution per store or branch
+    category: retail_sales
+    required_columns: [store_name, revenue_amount]
+    formula: sum_by(store_name, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_customer
+    name: Revenue by Customer
+    description: Total spend per customer
+    category: retail_sales
+    required_columns: [customer_id, revenue_amount]
+    formula: sum_by(customer_id, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: customer_order_count
+    name: Orders per Customer
+    description: Number of orders placed per customer
+    category: retail_sales
+    required_columns: [customer_id, order_id]
+    formula: count_by(customer_id)
+    chart_type: bar
+
+  - id: avg_price_by_product
+    name: Average Unit Price by Product
+    description: Mean selling price per product
+    category: retail_sales
+    required_columns: [product_name, unit_price]
+    formula: avg_by(product_name, unit_price)
+    unit: "$"
+    chart_type: bar
+
+  - id: total_profit
+    name: Total Profit
+    description: Sum of all profit in the selected period
+    category: retail_sales
+    required_columns: [profit]
+    formula: sum(profit)
+    unit: "$"
+    chart_type: card
+
+  - id: profit_by_category
+    name: Profit by Category
+    description: Profit breakdown by product category
+    category: retail_sales
+    required_columns: [category, profit]
+    formula: sum_by(category, profit)
+    unit: "$"
+    chart_type: bar
+
+  - id: profit_by_product
+    name: Profit by Product
+    description: Profit contribution per product
+    category: retail_sales
+    required_columns: [product_name, profit]
+    formula: sum_by(product_name, profit)
+    unit: "$"
+    chart_type: bar
+
+  - id: total_discount
+    name: Total Discount Given
+    description: Sum of all discounts applied in the period
+    category: retail_sales
+    required_columns: [discount]
+    formula: sum(discount)
+    unit: "$"
+    chart_type: card
+
+  - id: sales_by_payment_method
+    name: Sales by Payment Method
+    description: Order count split by payment type
+    category: retail_sales
+    required_columns: [payment_method]
+    formula: count_by(payment_method)
+    chart_type: pie
+
+  - id: avg_quantity_per_order
+    name: Average Quantity per Order
+    description: Mean number of units per transaction
+    category: retail_sales
+    required_columns: [quantity]
+    formula: avg(quantity)
+    chart_type: card
+
+  - id: sales_by_salesperson
+    name: Sales by Salesperson
+    description: Revenue attributed per sales representative
+    category: retail_sales
+    required_columns: [salesperson, revenue_amount]
+    formula: sum_by(salesperson, revenue_amount)
+    unit: "$"
+    chart_type: bar

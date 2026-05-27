@@ -1,0 +1,80 @@
+kpis:
+  - id: total_avoidance_time
+    name: Total Avoidance Time
+    description: Total time agents spent in work avoidance states
+    category: work_avoidance
+    required_columns: [avoidance_duration]
+    formula: sum(avoidance_duration)
+    unit: "min"
+    chart_type: card
+
+  - id: avoidance_rate
+    name: Work Avoidance Rate
+    description: Avoidance time as a percentage of total login time
+    category: work_avoidance
+    required_columns: [avoidance_duration, login_time]
+    formula: avoidance_rate
+    unit: "%"
+    chart_type: card
+
+  - id: avoidance_by_agent
+    name: Avoidance Time by Agent
+    description: Total avoidance duration broken down per agent
+    category: work_avoidance
+    required_columns: [agent_id, avoidance_duration]
+    formula: sum_by(agent_id, avoidance_duration)
+    unit: "min"
+    chart_type: bar
+
+  - id: avoidance_by_reason
+    name: Avoidance by Reason
+    description: Distribution of avoidance events by stated reason
+    category: work_avoidance
+    required_columns: [avoidance_reason]
+    formula: count_by(avoidance_reason)
+    chart_type: pie
+
+  - id: avoidance_trend
+    name: Daily Avoidance Trend
+    description: Total avoidance time per day over the reporting period
+    category: work_avoidance
+    required_columns: [date, avoidance_duration]
+    formula: sum_col_by_date(avoidance_duration)
+    unit: "min"
+    chart_type: line
+
+  - id: idle_time_total
+    name: Total Idle Time
+    description: Sum of all agent idle time across the period
+    category: work_avoidance
+    required_columns: [idle_time]
+    formula: sum(idle_time)
+    unit: "min"
+    chart_type: card
+
+  - id: not_ready_rate
+    name: Not Ready Rate
+    description: Not-ready time as a percentage of total login time
+    category: work_avoidance
+    required_columns: [not_ready_time, login_time]
+    formula: not_ready_rate
+    unit: "%"
+    chart_type: card
+
+  - id: acw_time_total
+    name: Total After Call Work Time
+    description: Sum of after-call work (ACW) time across all agents
+    category: work_avoidance
+    required_columns: [acw_time]
+    formula: sum(acw_time)
+    unit: "min"
+    chart_type: card
+
+  - id: avoidance_by_date_agent
+    name: Avoidance by Agent Over Time
+    description: Per-agent avoidance duration averaged across the period
+    category: work_avoidance
+    required_columns: [agent_id, avoidance_duration]
+    formula: avg_by(agent_id, avoidance_duration)
+    unit: "min"
+    chart_type: bar

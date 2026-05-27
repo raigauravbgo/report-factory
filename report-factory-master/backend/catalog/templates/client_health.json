@@ -1,0 +1,52 @@
+{
+  "template_id": "client_health_dashboard",
+  "display_name": "Client Health Dashboard",
+  "description": "Weekly client-level performance dashboard for collections clients",
+  "domain": "collections",
+  "required_kpis": ["contact_rate", "ptp_rate", "ptp_kept_rate"],
+  "optional_kpis": ["net_collected", "penetration_rate", "connect_rate", "abandon_rate", "total_collected"],
+  "required_dimensions": ["date", "agent_id"],
+  "optional_dimensions": ["campaign", "site"],
+  "charts": [
+    {
+      "chart_id": "contact_rate_trend",
+      "type": "line",
+      "title": "Contact Rate — Weekly Trend",
+      "kpi": "contact_rate",
+      "x_axis": "date",
+      "y_format": "percentage"
+    },
+    {
+      "chart_id": "ptp_rate_trend",
+      "type": "line",
+      "title": "PTP Rate — Weekly Trend",
+      "kpi": "ptp_rate",
+      "x_axis": "date",
+      "y_format": "percentage"
+    },
+    {
+      "chart_id": "ptp_kept_rate_trend",
+      "type": "line",
+      "title": "PTP Kept Rate — Weekly Trend",
+      "kpi": "ptp_kept_rate",
+      "x_axis": "date",
+      "y_format": "percentage"
+    },
+    {
+      "chart_id": "agent_contact_rate",
+      "type": "bar",
+      "title": "Contact Rate by Agent",
+      "kpi": "contact_rate",
+      "x_axis": "agent_id",
+      "y_format": "percentage"
+    },
+    {
+      "chart_id": "agent_ptp_rate",
+      "type": "bar",
+      "title": "PTP Rate by Agent",
+      "kpi": "ptp_rate",
+      "x_axis": "agent_id",
+      "y_format": "percentage"
+    }
+  ]
+}

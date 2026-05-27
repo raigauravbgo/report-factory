@@ -90,23 +90,25 @@ def _looks_like_date(series: pd.Series, name: str, non_null: pd.Series) -> bool:
     # Name hint is a strong signal
     if _DATE_NAME_HINTS.search(name):
         # Confirm at least some values parse
-        parsed = pd.to_datetime(non_null.astype(str), errors="coerce", infer_datetime_format=True)
+        parsed = pd.to_datetime(non_null.astype(str), errors="coerce")
         return parsed.notna().mean() >= 0.5
 
     # No name hint — require a higher parse success rate
     sample = non_null.head(200).astype(str)
-    parsed = pd.to_datetime(sample, errors="coerce", infer_datetime_format=True)
+    parsed = pd.to_datetime(sample, errors="coerce")
     return parsed.notna().mean() >= _DATE_PARSE_THRESHOLD
 
 
 def _serialize(values: list[Any]) -> list[Any]:
-    """Convert numpy scalars to Python natives so Pydantic can serialize them."""
+    """Convert numpy/pandas scalars to Python natives so Pydantic can serialize them."""
     result = []
     for v in values:
         if hasattr(v, "item"):
             result.append(v.item())
         elif isinstance(v, float) and pd.isna(v):
             result.append(None)
+        elif isinstance(v, pd.Timestamp):
+            result.append(v.isoformat())
         else:
             result.append(v)
     return result

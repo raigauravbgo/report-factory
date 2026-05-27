@@ -1,0 +1,309 @@
+kpis:
+
+  # ── Revenue ────────────────────────────────────────────────────────────────
+
+  - id: total_gross_revenue
+    name: Total Gross Revenue
+    description: Sum of revenue before discounts
+    category: advanced_sales
+    required_columns: [gross_revenue]
+    formula: sum(gross_revenue)
+    unit: "$"
+    chart_type: card
+
+  - id: total_net_revenue
+    name: Total Net Revenue
+    description: Sum of revenue after discounts and returns
+    category: advanced_sales
+    required_columns: [revenue_amount]
+    formula: sum(revenue_amount)
+    unit: "$"
+    chart_type: card
+
+  - id: net_revenue_trend
+    name: Net Revenue Trend
+    description: Daily net revenue over time
+    category: advanced_sales
+    required_columns: [date, revenue_amount]
+    formula: sum_col_by_date(revenue_amount)
+    unit: "$"
+    chart_type: line
+
+  - id: revenue_by_channel
+    name: Revenue by Sales Channel
+    description: Net revenue broken down by sales channel
+    category: advanced_sales
+    required_columns: [channel, revenue_amount]
+    formula: sum_by(channel, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_country
+    name: Revenue by Country
+    description: Net revenue per country
+    category: advanced_sales
+    required_columns: [country, revenue_amount]
+    formula: sum_by(country, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_city
+    name: Revenue by City
+    description: Net revenue broken down by city
+    category: advanced_sales
+    required_columns: [city, revenue_amount]
+    formula: sum_by(city, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_customer_segment
+    name: Revenue by Customer Segment
+    description: Net revenue per customer segment
+    category: advanced_sales
+    required_columns: [segment, revenue_amount]
+    formula: sum_by(segment, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_subcategory
+    name: Revenue by Product Subcategory
+    description: Net revenue per product subcategory
+    category: advanced_sales
+    required_columns: [product_subcategory, revenue_amount]
+    formula: sum_by(product_subcategory, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_agent
+    name: Revenue by Sales Agent
+    description: Net revenue attributed per sales agent
+    category: advanced_sales
+    required_columns: [agent_id, revenue_amount]
+    formula: sum_by(agent_id, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_campaign
+    name: Revenue by Marketing Campaign
+    description: Net revenue per marketing campaign
+    category: advanced_sales
+    required_columns: [campaign_name, revenue_amount]
+    formula: sum_by(campaign_name, revenue_amount)
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_currency
+    name: Revenue by Currency
+    description: Net revenue split by transaction currency
+    category: advanced_sales
+    required_columns: [currency, revenue_amount]
+    formula: sum_by(currency, revenue_amount)
+    unit: "$"
+    chart_type: pie
+
+  # ── Margin & Cost ──────────────────────────────────────────────────────────
+
+  - id: total_gross_margin
+    name: Total Gross Margin
+    description: Sum of gross margin across all transactions
+    category: advanced_sales
+    required_columns: [profit]
+    formula: sum(profit)
+    unit: "$"
+    chart_type: card
+
+  - id: total_cost
+    name: Total Cost
+    description: Sum of cost of goods sold
+    category: advanced_sales
+    required_columns: [variable_cost]
+    formula: sum(variable_cost)
+    unit: "$"
+    chart_type: card
+
+  - id: margin_by_channel
+    name: Gross Margin by Channel
+    description: Gross margin per sales channel
+    category: advanced_sales
+    required_columns: [channel, profit]
+    formula: sum_by(channel, profit)
+    unit: "$"
+    chart_type: bar
+
+  - id: margin_by_region
+    name: Gross Margin by Region
+    description: Gross margin per region
+    category: advanced_sales
+    required_columns: [region, profit]
+    formula: sum_by(region, profit)
+    unit: "$"
+    chart_type: bar
+
+  - id: margin_by_segment
+    name: Gross Margin by Customer Segment
+    description: Gross margin per customer segment
+    category: advanced_sales
+    required_columns: [segment, profit]
+    formula: sum_by(segment, profit)
+    unit: "$"
+    chart_type: bar
+
+  - id: cost_by_category
+    name: Cost by Product Category
+    description: Total cost of goods per product category
+    category: advanced_sales
+    required_columns: [category, variable_cost]
+    formula: sum_by(category, variable_cost)
+    unit: "$"
+    chart_type: bar
+
+  # ── Discount ───────────────────────────────────────────────────────────────
+
+  - id: total_discount_given
+    name: Total Discount Amount
+    description: Total discount value applied across all transactions
+    category: advanced_sales
+    required_columns: [discount]
+    formula: sum(discount)
+    unit: "$"
+    chart_type: card
+
+  - id: avg_discount_pct
+    name: Average Discount Percentage
+    description: Mean discount percentage applied per transaction
+    category: advanced_sales
+    required_columns: [discount_pct]
+    formula: avg_pct(discount_pct)
+    unit: "%"
+    chart_type: card
+
+  - id: discount_by_campaign
+    name: Discount Amount by Campaign
+    description: Total discounts given per marketing campaign
+    category: advanced_sales
+    required_columns: [campaign_name, discount]
+    formula: sum_by(campaign_name, discount)
+    unit: "$"
+    chart_type: bar
+
+  - id: discount_by_channel
+    name: Discount Amount by Channel
+    description: Total discounts given per sales channel
+    category: advanced_sales
+    required_columns: [channel, discount]
+    formula: sum_by(channel, discount)
+    unit: "$"
+    chart_type: bar
+
+  # ── Orders & Fulfilment ────────────────────────────────────────────────────
+
+  - id: orders_by_status
+    name: Orders by Status
+    description: Count of orders broken down by order status
+    category: advanced_sales
+    required_columns: [order_status]
+    formula: count_by(order_status)
+    chart_type: pie
+
+  - id: orders_by_channel
+    name: Orders by Channel
+    description: Order volume per sales channel
+    category: advanced_sales
+    required_columns: [channel]
+    formula: count_by(channel)
+    chart_type: bar
+
+  - id: orders_by_country
+    name: Orders by Country
+    description: Order volume per country
+    category: advanced_sales
+    required_columns: [country]
+    formula: count_by(country)
+    chart_type: bar
+
+  - id: orders_by_segment
+    name: Orders by Customer Segment
+    description: Order count per customer segment
+    category: advanced_sales
+    required_columns: [segment]
+    formula: count_by(segment)
+    chart_type: pie
+
+  - id: orders_by_campaign
+    name: Orders by Campaign
+    description: Number of orders driven per campaign
+    category: advanced_sales
+    required_columns: [campaign_name]
+    formula: count_by(campaign_name)
+    chart_type: bar
+
+  - id: return_rate
+    name: Return Rate
+    description: Percentage of transactions flagged as returned
+    category: advanced_sales
+    required_columns: [return_flag]
+    formula: rate_flag(return_flag)
+    unit: "%"
+    chart_type: card
+
+  - id: avg_delivery_days
+    name: Average Delivery Days
+    description: Mean number of days from order to delivery
+    category: advanced_sales
+    required_columns: [delivery_days]
+    formula: avg(delivery_days)
+    unit: "days"
+    chart_type: card
+
+  - id: delivery_days_by_region
+    name: Delivery Days by Region
+    description: Average delivery time per region
+    category: advanced_sales
+    required_columns: [region, delivery_days]
+    formula: avg_by(region, delivery_days)
+    unit: "days"
+    chart_type: bar
+
+  - id: delivery_days_by_channel
+    name: Delivery Days by Channel
+    description: Average delivery time per sales channel
+    category: advanced_sales
+    required_columns: [channel, delivery_days]
+    formula: avg_by(channel, delivery_days)
+    unit: "days"
+    chart_type: bar
+
+  # ── Customer Experience ────────────────────────────────────────────────────
+
+  - id: avg_customer_rating
+    name: Average Customer Rating
+    description: Mean customer satisfaction rating across all orders
+    category: advanced_sales
+    required_columns: [customer_rating]
+    formula: avg(customer_rating)
+    unit: "/ 5"
+    chart_type: card
+
+  - id: rating_by_region
+    name: Customer Rating by Region
+    description: Average rating per geographic region
+    category: advanced_sales
+    required_columns: [region, customer_rating]
+    formula: avg_by(region, customer_rating)
+    chart_type: bar
+
+  - id: rating_by_channel
+    name: Customer Rating by Channel
+    description: Average rating per sales channel
+    category: advanced_sales
+    required_columns: [channel, customer_rating]
+    formula: avg_by(channel, customer_rating)
+    chart_type: bar
+
+  - id: rating_by_category
+    name: Customer Rating by Product Category
+    description: Average rating per product category
+    category: advanced_sales
+    required_columns: [category, customer_rating]
+    formula: avg_by(category, customer_rating)
+    chart_type: bar

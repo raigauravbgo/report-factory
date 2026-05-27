@@ -1,0 +1,51 @@
+kpis:
+  - id: total_revenue
+    name: Total Revenue
+    description: Sum of all revenue in the selected period
+    category: revenue
+    required_columns: [revenue_amount, date]
+    formula: sum(revenue_amount)
+    unit: "$"
+    chart_type: card
+
+  - id: revenue_trend
+    name: Revenue Trend
+    description: Daily revenue over time
+    category: revenue
+    required_columns: [revenue_amount, date]
+    formula: sum_by_date
+    chart_type: line
+
+  - id: revenue_per_agent
+    name: Revenue per Agent
+    description: Average revenue generated per agent
+    category: revenue
+    required_columns: [revenue_amount, agent_id]
+    formula: revenue_per_agent
+    unit: "$"
+    chart_type: bar
+
+  - id: revenue_by_client
+    name: Revenue by Client
+    description: Revenue breakdown by client
+    category: revenue
+    required_columns: [revenue_amount, client_id]
+    formula: sum_by_client
+    chart_type: bar
+
+  - id: contribution_margin
+    name: Contribution Margin
+    description: Revenue minus variable costs
+    category: revenue
+    required_columns: [revenue_amount, variable_cost]
+    formula: contribution_margin
+    unit: "$"
+    chart_type: card
+
+  - id: revenue_by_segment
+    name: Revenue by Segment
+    description: Revenue broken down by business segment
+    category: revenue
+    required_columns: [revenue_amount, segment]
+    formula: revenue_by_segment
+    chart_type: bar

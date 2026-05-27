@@ -12,8 +12,9 @@ class Upload(Base):
     dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id"), nullable=False)
     s3_key: Mapped[str] = mapped_column(String(512), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    # pending | profiling | profiled | failed
+    # pending | profiling | profiled | failed | analyzing | complete
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    file_type: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

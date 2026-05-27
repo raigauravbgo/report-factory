@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Dashboard — AI-Powered BI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-inner">
+    <h1 class="brand">Executive Dashboard <span class="badge">AI-Powered</span></h1>
+    <div id="session-info" class="session-info hidden">
+      Session: <code id="session-id-display"></code>
+    </div>
+  </div>
+</header>
+
+<main class="app-main">
+
+  <!-- Step Indicator -->
+  <nav class="steps" id="step-indicator">
+    <div class="step active" data-step="1">
+      <span class="step-num">1</span>
+      <span class="step-label">Upload Data</span>
+    </div>
+    <div class="step-divider"></div>
+    <div class="step" data-step="2">
+      <span class="step-num">2</span>
+      <span class="step-label">Map Columns</span>
+    </div>
+    <div class="step-divider"></div>
+    <div class="step" data-step="3">
+      <span class="step-num">3</span>
+      <span class="step-label">Select KPIs</span>
+    </div>
+    <div class="step-divider"></div>
+    <div class="step" data-step="4">
+      <span class="step-num">4</span>
+      <span class="step-label">Dashboard</span>
+    </div>
+  </nav>
+
+  <!-- Step 1: Upload -->
+  <section id="step-1" class="step-panel active">
+    <div class="panel-header">
+      <h2>Upload Your Data Files</h2>
+      <p>Upload one or more CSV or Excel files. Label each file so the AI can understand your data structure.</p>
+    </div>
+    <div id="drop-zone" class="drop-zone">
+      <div class="drop-zone-inner">
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+        <p class="drop-text">Drag &amp; drop files here or <label class="browse-label" for="file-input">browse</label></p>
+        <p class="drop-subtext">CSV, XLS, XLSX &mdash; up to 50 MB per file</p>
+      </div>
+      <input type="file" id="file-input" multiple accept=".csv,.xls,.xlsx" hidden />
+    </div>
+
+    <div id="file-list" class="file-list hidden"></div>
+
+    <div id="upload-actions" class="actions hidden">
+      <button id="btn-upload" class="btn btn-primary">
+        Analyze Files
+        <span class="spinner hidden" id="upload-spinner"></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- Step 2: Column Mapping -->
+  <section id="step-2" class="step-panel hidden">
+    <div class="panel-header">
+      <h2>Review Column Mapping</h2>
+      <p>The AI has mapped your columns to standard field names. Review flagged mappings before continuing.</p>
+    </div>
+    <div class="legend">
+      <span class="badge-auto">Auto</span> High confidence &nbsp;
+      <span class="badge-review">Review</span> Needs attention &nbsp;
+      <span class="badge-manual">Manual</span> User-adjusted &nbsp;
+      <span class="badge-ignored">Ignored</span> Excluded
+    </div>
+    <div class="table-wrap">
+      <table id="mapping-table" class="mapping-table">
+        <thead>
+          <tr>
+            <th>Original Column</th>
+            <th>Maps To</th>
+            <th>Confidence</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="mapping-tbody"></tbody>
+      </table>
+    </div>
+    <div class="actions">
+      <button id="btn-confirm-mapping" class="btn btn-primary">Confirm &amp; Continue</button>
+    </div>
+  </section>
+
+  <!-- Step 3: KPI Selection -->
+  <section id="step-3" class="step-panel hidden">
+    <div class="panel-header">
+      <h2>Select KPIs to Analyze</h2>
+      <p>Available KPIs are determined by the columns in your data. Blocked KPIs require additional fields.</p>
+    </div>
+    <div id="data-quality-summary" class="quality-summary"></div>
+    <div id="kpi-grid" class="kpi-grid"></div>
+    <div class="actions">
+      <button id="btn-run-analysis" class="btn btn-primary btn-lg">Run Analysis</button>
+    </div>
+  </section>
+
+  <!-- Step 4: Dashboard -->
+  <section id="step-4" class="step-panel hidden">
+    <div class="panel-header">
+      <div class="panel-header-row">
+        <div>
+          <h2>Dashboard</h2>
+          <p id="dashboard-subtitle">AI-generated insights from your data</p>
+        </div>
+        <div class="export-buttons">
+          <button id="btn-export-excel" class="btn btn-outline">&#8595; Excel</button>
+          <button id="btn-export-pptx" class="btn btn-outline">&#8595; PowerPoint</button>
+        </div>
+      </div>
+    </div>
+    <div id="analyzing-indicator" class="analyzing-indicator hidden">
+      <div class="spinner-lg"></div>
+      <p>Analyzing your data&hellip;</p>
+    </div>
+    <div id="kpi-cards" class="kpi-cards"></div>
+    <div id="chart-grid" class="chart-grid"></div>
+  </section>
+
+</main>
+
+<script src="/static/js/app.js"></script>
+<script src="/static/js/upload.js"></script>
+<script src="/static/js/mapping.js"></script>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>

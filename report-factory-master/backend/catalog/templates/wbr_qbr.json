@@ -1,0 +1,51 @@
+{
+  "template_id": "wbr_qbr",
+  "display_name": "WBR / QBR Report",
+  "description": "Weekly and quarterly business review report for client stakeholders and operations leadership",
+  "domain": "collections",
+  "required_kpis": ["contact_rate", "ptp_rate", "ptp_kept_rate", "net_collected", "penetration_rate"],
+  "optional_kpis": ["csat_score", "occupancy_rate", "total_collected", "abandon_rate", "connect_rate"],
+  "required_dimensions": ["date"],
+  "optional_dimensions": ["agent_id", "site", "campaign"],
+  "charts": [
+    {
+      "chart_id": "scorecard_tiles",
+      "type": "kpi_card",
+      "title": "KPI Summary",
+      "kpis": ["contact_rate", "ptp_rate", "ptp_kept_rate", "net_collected"],
+      "y_format": "mixed"
+    },
+    {
+      "chart_id": "contact_rate_trend",
+      "type": "line",
+      "title": "Contact Rate — Period Trend",
+      "kpi": "contact_rate",
+      "x_axis": "date",
+      "y_format": "percentage"
+    },
+    {
+      "chart_id": "ptp_rate_trend",
+      "type": "line",
+      "title": "PTP Rate — Period Trend",
+      "kpi": "ptp_rate",
+      "x_axis": "date",
+      "y_format": "percentage"
+    },
+    {
+      "chart_id": "net_collected_trend",
+      "type": "bar",
+      "title": "Net Collected — Period Trend",
+      "kpi": "net_collected",
+      "x_axis": "date",
+      "y_format": "currency"
+    },
+    {
+      "chart_id": "penetration_trend",
+      "type": "line",
+      "title": "Penetration Rate — Period Trend",
+      "kpi": "penetration_rate",
+      "x_axis": "date",
+      "y_format": "percentage"
+    }
+  ]
+}

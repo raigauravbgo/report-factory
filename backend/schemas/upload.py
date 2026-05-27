@@ -8,6 +8,7 @@ class UploadResponse(BaseModel):
     dataset_id: int
     filename: str
     status: str
+    file_type: str = "unknown"
     created_at: datetime
 
     model_config = {"from_attributes": True}

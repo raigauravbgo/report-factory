@@ -1,0 +1,67 @@
+kpis:
+  - id: contactability_rate
+    name: Contactability Rate
+    description: Percentage of calls that resulted in a live contact
+    category: collections
+    required_columns: [call_id, disposition]
+    formula: contactability_rate
+    unit: "%"
+    chart_type: line
+
+  - id: rpc_rate
+    name: RPC Rate
+    description: Right Party Contact rate — contacts that reached the correct person
+    category: collections
+    required_columns: [call_id, disposition, is_rpc]
+    formula: rpc_rate
+    unit: "%"
+    chart_type: bar
+
+  - id: ptp_conversion
+    name: PTP Conversion Rate
+    description: Promise-to-Pay conversion from Right Party Contacts
+    category: collections
+    required_columns: [call_id, is_rpc, is_ptp]
+    formula: ptp_conversion
+    unit: "%"
+    chart_type: bar
+
+  - id: agent_leaderboard
+    name: Agent Leaderboard
+    description: Contact performance ranking by agent
+    category: collections
+    required_columns: [agent_id, call_id, disposition]
+    formula: count_by_agent
+    chart_type: table
+
+  - id: hourly_contactability
+    name: Hourly Contactability Trend
+    description: Contact rate broken down by hour of day
+    category: collections
+    required_columns: [call_timestamp, disposition]
+    formula: contactability_by_hour
+    chart_type: bar
+
+  - id: channel_performance
+    name: Channel Performance
+    description: Inbound vs Outbound and Manual vs Auto-dial breakdown
+    category: collections
+    required_columns: [call_id, direction, dial_type, disposition]
+    formula: performance_by_channel
+    chart_type: bar
+
+  - id: campaign_breakdown
+    name: Campaign Level Breakdown
+    description: Contact rate and volume per campaign
+    category: collections
+    required_columns: [call_id, campaign_name, disposition]
+    formula: count_by_campaign
+    chart_type: bar
+
+  - id: region_performance
+    name: Performance by Province/Region
+    description: Contactability and RPC rate by geographic region
+    category: collections
+    required_columns: [call_id, region, disposition]
+    formula: performance_by_region
+    chart_type: bar

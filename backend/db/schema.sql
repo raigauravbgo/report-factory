@@ -23,13 +23,17 @@ CREATE TABLE IF NOT EXISTS kpi_catalog (
     kpi_id        TEXT PRIMARY KEY,
     display_name  TEXT NOT NULL,
     description   TEXT,
-    numerator     TEXT NOT NULL,
-    denominator   TEXT NOT NULL,   -- "_none_" for pure sum/count KPIs
+    numerator     TEXT,
+    denominator   TEXT,            -- "_none_" for pure sum/count KPIs
     format        TEXT NOT NULL,   -- percentage | integer | currency | duration
     domain        TEXT NOT NULL,   -- collections | cx | sales | workforce | ops
     expected_range TEXT,           -- JSON: {"min": 0, "max": 1} or null
     aliases       TEXT,            -- JSON array
     source_fields TEXT,            -- JSON array
+    required_columns TEXT,         -- JSON array (from YAML registry)
+    formula       TEXT,            -- formula string (from YAML registry)
+    chart_type    TEXT DEFAULT 'bar',
+    unit          TEXT DEFAULT '',
     reviewed      INTEGER DEFAULT 0
 );
 

@@ -1,0 +1,18 @@
+
+> frontend@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.10.39.191:3000
+✓ Ready in 679ms
+
+ GET /upload 200 in 840ms (next.js: 339ms, application-code: 502ms)
+ GET /profile/8 200 in 791ms (next.js: 733ms, application-code: 58ms)
+ GET /mapping/8 200 in 757ms (next.js: 713ms, application-code: 45ms)
+ GET /kpis?uploadId=8&recipeId=3 200 in 120ms (next.js: 30ms, application-code: 90ms)
+ GET /mapping/8 200 in 91ms (next.js: 30ms, application-code: 60ms)
+ GET /kpis?uploadId=8&recipeId=3 200 in 43ms (next.js: 4ms, application-code: 39ms)
+ GET /kpis?uploadId=8&recipeId=3 200 in 89ms (next.js: 3ms, application-code: 86ms)
+○ Compiling /dashboard/[recipeId] ...
+ GET /dashboard/3?uploadId=8 200 in 5.9s (next.js: 5.8s, application-code: 109ms)
