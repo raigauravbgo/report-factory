@@ -1,4 +1,4 @@
-# Executive Dashboard — Application Flow
+# Report Factory — Application Flow
 
 Here's the full flow with every file's role:
 
