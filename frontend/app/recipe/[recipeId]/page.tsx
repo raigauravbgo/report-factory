@@ -69,7 +69,12 @@ export default function RecipePage() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-12 space-y-10">
+    <div className="min-h-screen flex flex-col">
+      <div className="bg-white border-b border-gray-200 px-6 py-5">
+        <h1 className="text-lg font-bold text-[#1B2340]">Report Recipe</h1>
+        <p className="text-xs text-gray-400 mt-0.5">Review and edit the configuration before approving.</p>
+      </div>
+    <main className="mx-auto max-w-3xl w-full px-4 py-8 space-y-8">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Report recipe</h1>
@@ -77,11 +82,21 @@ export default function RecipePage() {
             Review and edit the configuration before approving.
           </p>
         </div>
-        {approved && (
-          <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
-            Approved
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {approved && (
+            <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+              Approved
+            </span>
+          )}
+          {approved && (
+            <button
+              onClick={() => setApproved(false)}
+              className="rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              Edit
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Summary */}
@@ -182,7 +197,7 @@ export default function RecipePage() {
         {approved ? (
           <button
             onClick={() => router.push(`/dashboard/${recipeId}`)}
-            className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="rounded-lg bg-[#00B5AD] px-5 py-2 text-sm font-medium text-white hover:bg-[#009d96]"
           >
             View dashboard →
           </button>
@@ -197,5 +212,6 @@ export default function RecipePage() {
         )}
       </div>
     </main>
+    </div>
   );
 }

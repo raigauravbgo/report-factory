@@ -97,13 +97,12 @@ export default function InterviewPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10 flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Report interview</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Answer a few questions to configure your dashboard.
-        </p>
+    <div className="min-h-screen flex flex-col">
+      <div className="bg-white border-b border-gray-200 px-6 py-5">
+        <h1 className="text-lg font-bold text-[#1B2340]">Report Interview</h1>
+        <p className="text-xs text-gray-400 mt-0.5">Answer a few questions to configure your dashboard.</p>
       </div>
+    <main className="mx-auto max-w-2xl w-full px-4 py-8 flex flex-col gap-6">
 
       {/* Step progress */}
       <ol className="flex gap-1">
@@ -194,5 +193,6 @@ export default function InterviewPage() {
         </form>
       )}
     </main>
+    </div>
   );
 }
