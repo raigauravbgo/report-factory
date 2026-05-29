@@ -2,11 +2,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
+from core.database import Base, engine
 from api.routes import upload as upload_router
 from api.routes import interview as interview_router
 from api.routes import kpis as kpis_router
 from api.routes import reports as reports_router
 from db.database import init_db
+
+# Import all models so SQLAlchemy registers them before create_all
+import models.dataset  # noqa
+import models.upload  # noqa
+import models.staging_table  # noqa
+import models.processed_table  # noqa
+import models.report_recipe  # noqa
+import models.kpi_definition  # noqa
+import models.dashboard_config  # noqa
 
 app = FastAPI(
     title="BGO Report Factory",
@@ -21,6 +31,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Create SQLAlchemy tables (upload/interview routes)
+Base.metadata.create_all(bind=engine)
 
 # Ensure PRD3 schema tables exist on startup (idempotent)
 init_db()

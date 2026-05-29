@@ -49,8 +49,8 @@ def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _write_staging_table(df: pd.DataFrame, table_name: str, db: Session) -> None:
-    conn = db.get_bind()
+    from core.database import engine
     # Drop if re-parsing the same upload
-    db.execute(text(f"DROP TABLE IF EXISTS `{table_name}`"))
+    db.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
     db.commit()
-    df.to_sql(table_name, con=conn, index=False, if_exists="replace", chunksize=5000)
+    df.to_sql(table_name, con=engine, index=False, if_exists="replace", chunksize=5000)
