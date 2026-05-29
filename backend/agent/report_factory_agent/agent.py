@@ -1,14 +1,36 @@
-from google.adk.agents import Agent
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from google.adk.agents import Agent
+from google.adk.models.lite_llm import LiteLlm
+
+from core.config import settings
 from .tools.define_kpi import run_define_new_kpi
 from .tools.intake import run_intake
 from .tools.data_discovery import run_data_discovery
 from .tools.standardise import run_standardise
 from .tools.generate import run_generate
 
+
+def _resolve_model():
+    """
+    Resolve ADK model from config.
+    - ADK_PROVIDER=openai  → LiteLLM + OPENAI_API_KEY  (default, no extra key)
+    - ADK_PROVIDER=anthropic → Claude directly via ANTHROPIC_API_KEY
+    Switch providers by changing ADK_PROVIDER + ADK_MODEL in .env only.
+    """
+    if settings.adk_provider == "anthropic":
+        return settings.adk_model  # ADK handles Anthropic natively
+    # Default: OpenAI via LiteLLM
+    import os
+    os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
+    return LiteLlm(model=f"openai/{settings.adk_model}")
+
+
 root_agent = Agent(
     name="report_factory_agent",
-    model="claude-sonnet-4-20250514",
+    model=_resolve_model(),
     description="BGO Report Factory: interviews users, ingests Excel data, computes KPIs, and generates dashboards and PPTX decks.",
     instruction="""
 You are the BGO Report Factory assistant. Guide the user through building a report in four steps.
