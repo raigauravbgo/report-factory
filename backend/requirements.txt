@@ -8,6 +8,7 @@ httpx==0.28.1
 
 # Agent
 google-adk>=1.0.0
+litellm                 # required for google-adk LiteLlm model (OpenAI/any provider via ADK)
 anthropic>=0.30.0
 
 # Data

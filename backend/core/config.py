@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     adk_provider: str = "openai"
     adk_model: str = "gpt-4o-mini"
     anthropic_api_key: str = ""
+    # adk_enabled: True = try ADK first, fall back to Flow 1 (OpenAI) on failure
+    #              False = Flow 1 only (default — safe, always works)
+    adk_enabled: bool = False
 
     # App
     app_env: str = "development"

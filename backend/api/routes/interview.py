@@ -3,6 +3,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
+import logging
+
+from core.config import settings
 from core.database import get_db
 from models.kpi_definition import KpiDefinition
 from models.report_recipe import ReportRecipe
@@ -19,6 +22,8 @@ from schemas.interview import (
 )
 from schemas.upload import ProfilingResult
 from services import ai_interview, recipe_generator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/interview", tags=["interview"])
 
@@ -54,12 +59,40 @@ def run_interview(
     profile = _load_profile(body.upload_id, db)
     history = [m.model_dump() for m in body.history]
 
+    # ── Flow 2: ADK agent (when ADK_ENABLED=true) ─────────────────────────────
+    if settings.adk_enabled:
+        try:
+            from services.adk_runner import run_turn
+            session_id = f"upload_{body.upload_id}"
+            ai_message = run_turn(session_id, body.message)
+
+            # Reuse Flow 1 extraction logic to parse step/completion from response
+            updated = list(history)
+            if body.message:
+                updated.append({"role": "user", "content": body.message})
+            updated.append({"role": "assistant", "content": ai_message})
+            extracted = ai_interview._extract(updated, profile)
+            step = ai_interview._step(extracted)
+            done = ai_interview._complete(extracted) or "[INTERVIEW_COMPLETE]" in ai_message
+            result = ai_interview._to_result(extracted) if done else None
+            display = ai_message.replace("[INTERVIEW_COMPLETE]", "").strip()
+
+            return InterviewResponse(
+                message=display,
+                step_index=step,
+                step_label=STEP_LABELS[step - 1],
+                completed=done,
+                interview_result=result,
+            )
+        except Exception as e:
+            logger.warning(f"ADK failed (falling back to Flow 1 OpenAI): {e}")
+
+    # ── Flow 1: OpenAI fallback (always runs if ADK disabled or failed) ────────
     ai_message, step_index, completed, result = ai_interview.run(
         message=body.message,
         history=history,
         profile=profile,
     )
-
     return InterviewResponse(
         message=ai_message,
         step_index=step_index,
