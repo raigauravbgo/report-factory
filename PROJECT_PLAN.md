@@ -28,10 +28,10 @@ This is the first surface of the BGO AI Platform. The KPI catalog, schema memory
 
 ## Two Flows in This Codebase
 
-> **Architecture note:** Two parallel flows exist. Flow 1 is fully working end-to-end. Flow 2 backend tools are built but not connected to any frontend. Open Question #12 tracks whether they should merge.
+> **Architecture note:** Both flows share the same `/interview` endpoint. `ADK_ENABLED=true` in `.env` activates the ADK agent; `ADK_ENABLED=false` (default) uses OpenAI. Flow 1 is always the automatic fallback.
 
 ### ✅ Flow 1 — Self-Service (Upload → Profile → Interview → Recipe → Dashboard)
-Uses OpenAI for the interview. No ADK dependency. Fully working end-to-end.
+Uses OpenAI for the interview. Fully working end-to-end. Default when `ADK_ENABLED=false`.
 ```
 POST /upload → GET /upload/{id} (poll) → GET /upload/{id}/profile
   → POST /interview (OpenAI chat turns)
@@ -39,11 +39,13 @@ POST /upload → GET /upload/{id} (poll) → GET /upload/{id}/profile
   → GET /api/dashboard/{id}/data → GET /api/dashboard/{id}/export/excel
 ```
 
-### ⚠️ Flow 2 — ADK Agent (Intake → Upload → Mapping → Compute → Review Queue)
-All backend tools built. No frontend. Not connected via HTTP.
+### ✅ Flow 2 — ADK Agent (wired into /interview, ADK_ENABLED=true)
+ADK agent activated via `ADK_ENABLED=true`. Falls back to Flow 1 on failure. Model switchable via `ADK_PROVIDER=openai|anthropic`.
 ```
-POST /api/reports → ADK Agent (run_intake → run_data_discovery
-  → run_standardise → run_generate) → review_queue
+POST /interview (ADK_ENABLED=true)
+  → adk_runner.run_turn() → root_agent (LiteLLM/OpenAI or Claude)
+  → run_intake → run_data_discovery → run_standardise → run_generate
+  → review_queue
 ```
 
 ---
@@ -65,13 +67,14 @@ report-factory/
 │   │           └── generate.py          ✅ Step 4: chart JSON + review queue entry
 │   ├── api/routes/
 │   │   ├── upload.py                    ✅ File upload + background profiling
-│   │   ├── interview.py                 ✅ OpenAI interview + recipe creation
+│   │   ├── interview.py                 ✅ ADK-primary + OpenAI fallback + recipe creation
 │   │   ├── kpis.py                      ✅ KPI catalog CRUD + review flag
 │   │   ├── reports.py                   ✅ ADK report lifecycle + review queue
 │   │   └── dashboard.py                 ✅ NEW — KPI computation + Excel export
 │   ├── services/
 │   │   ├── compute.py                   ✅ NEW — formula evaluator, time series, breakdown, insights
-│   │   ├── ai_interview.py              ✅ OpenAI 5-step interview engine
+│   │   ├── adk_runner.py                ✅ NEW — ADK session runner, session creation, Flow 1 fallback
+│   │   ├── ai_interview.py              ✅ OpenAI 5-step interview engine (Flow 1 + fallback)
 │   │   ├── profiler.py                  ✅ Column type detection
 │   │   ├── parser.py                    ✅ Excel/CSV → SQLite staging table
 │   │   ├── recipe_generator.py          ✅ Interview result → RecipeConfig + chart layout
@@ -91,7 +94,7 @@ report-factory/
 │   │   ├── layout.tsx                   ✅ Root layout with DarkSidebar
 │   │   ├── upload/page.tsx              ✅ File upload with step indicator
 │   │   ├── profile/[uploadId]/page.tsx  ✅ Column profile review → interview
-│   │   ├── interview/page.tsx           ✅ 5-step chat interview (OpenAI)
+│   │   ├── interview/page.tsx           ✅ Chat interview (ADK primary, OpenAI fallback)
 │   │   ├── recipe/[recipeId]/page.tsx   ✅ Recipe review + edit + approve
 │   │   └── dashboard/[recipeId]/page.tsx ✅ Full dashboard — KPI cards, charts, insights
 │   └── components/
@@ -129,7 +132,7 @@ report-factory/
 
 ---
 
-### ✅ Complete — Flow 2 Backend (ADK Agent Tools)
+### ✅ Complete — Flow 2 ADK Agent
 
 | Feature | Notes |
 |---|---|
@@ -141,19 +144,21 @@ report-factory/
 | Review queue API | List, approve (+ overrides + promote_kpis), reject, new-kpis |
 | Schema memory API | Save on approve, check endpoint |
 | KPI catalog API | CRUD + reviewed flag |
+| ADK wired into `/interview` | `services/adk_runner.py` — session management, ADK 2.x session creation fix |
+| OpenAI fallback | Auto-falls back to Flow 1 on any ADK failure; logged as warning |
+| Dynamic model provider | `ADK_PROVIDER=openai` (LiteLLM) or `ADK_PROVIDER=anthropic` (Claude) — `.env` only |
+| `ADK_ENABLED` flag | `false` = OpenAI only; `true` = ADK primary + fallback |
 
 ---
 
-### ❌ Pending — Flow 2 Frontend & HTTP Integration
+### ❌ Pending — Frontend Screens (PRD3 Section 8)
 
 | Item | Priority | Notes |
 |---|---|---|
-| `POST /api/reports/{id}/chat` — FastAPI proxy to ADK agent | High | Without this, Flow 2 cannot be triggered from any frontend |
-| Library / Home page — grid of all reports with status badges | High | Currently `/` is a 404 |
-| Intake Chat UI wired to ADK (`/intake`) | High | Progress stepper + KPI checklist + file dropzone |
-| Mapping Confirmation screen | High | Table: raw col → KPI → confidence → override dropdown |
-| Review Queue frontend UI | High | List + detail + approve/reject/approve-with-edits |
-| `adk web` end-to-end trace verification | Medium | Requires `ANTHROPIC_API_KEY` to be correctly set |
+| Library / Home page — grid of all reports with status badges | High | Currently `/` is a 404; PRD requires this as the entry point |
+| Mapping Confirmation screen | High | Table: raw col → KPI → confidence score → override dropdown |
+| Review Queue frontend UI | High | List + detail + approve/reject/approve-with-edits; backend fully done |
+| `adk web` end-to-end trace verification | Medium | Set `ADK_ENABLED=true` and run a full loop to verify traces |
 
 ---
 
@@ -189,8 +194,8 @@ report-factory/
 | Gate | Status | Blocker |
 |---|---|---|
 | Dev can clone + run full app in < 1 hour | ⚠️ ~1.5 hrs currently | pip memory issue on Windows; needs better setup docs |
-| Agent completes full loop for 3 reports | ❌ Not done | Flow 2 HTTP endpoint + frontend UI missing |
-| Client Health Dashboard template renders | ⚠️ Flow 1 works; Flow 2 template not connected | ADK `/chat` endpoint needed |
+| Agent completes full loop for 3 reports | ⚠️ ADK wired, needs real BGO data test | Set `ADK_ENABLED=true`, upload real Excel, complete full conversation |
+| Client Health Dashboard template renders | ⚠️ ADK active; template routing via agent instruction | ADK asks for template type — verify client_health renders correctly |
 | Review queue: approve, reject, approve-with-edits | ⚠️ Backend done | Frontend review queue UI missing |
 | Schema memory saves + skips mapping on second run | ⚠️ Saves on approve | Pre-fill in `run_data_discovery` not wired |
 | PPTX export produces valid file | ❌ Not done | BGO `.pptx` slide master file required |
@@ -207,7 +212,7 @@ report-factory/
 POST   /upload                              ✅ File upload → background profile
 GET    /upload/{id}                         ✅ Poll profiling status
 GET    /upload/{id}/profile                 ✅ Column profile data
-POST   /interview                           ✅ One turn of OpenAI interview
+POST   /interview                           ✅ ADK agent primary (OpenAI fallback) — ADK_ENABLED flag
 POST   /interview/recipe                    ✅ Generate recipe from interview result
 GET    /interview/recipe/{id}               ✅ Get recipe config
 POST   /interview/recipe/{id}/approve       ✅ Approve / re-approve recipe
@@ -234,7 +239,7 @@ GET    /api/kpis/{id}                       ✅ Single KPI detail
 POST   /api/kpis/{id}/review                ✅ Mark reviewed=true/false
 
 # ── Missing ────────────────────────────────────────────────────────────────
-POST   /api/reports/{id}/chat               ❌ ADK agent proxy (Flow 2 entry point)
+POST   /api/reports/{id}/chat               ⚠️ Not built as separate endpoint — ADK now runs via /interview (ADK_ENABLED=true)
 GET    /api/reports/{id}/files              ❌ Multi-file list
 POST   /api/reports/{id}/upload/done        ❌ Signal upload complete → trigger discovery
 GET    /api/reports/{id}/pptx               ❌ PPTX download
@@ -257,7 +262,7 @@ GET    /api/reports/{id}/pptx               ❌ PPTX download
 | 9 | ~~AWS or Railway for production?~~ | Platform lead | ✅ Railway — Volumes for storage, managed PostgreSQL plugin |
 | 10 | ~~Self-hosted Langfuse or cloud?~~ | Platform lead | ✅ Langfuse Cloud free tier |
 | 11 | Typical number of Excel files per report? (informs multi-file upload UX) | Ops users | Needed for multi-file design |
-| 12 | Should Flow 1 (OpenAI interview) and Flow 2 (ADK agent) merge into one UX, or stay as separate entry points? | Product lead | **Architecture decision needed before Week 3 frontend build** |
+| 12 | ~~Should Flow 1 and Flow 2 merge?~~ | Product lead | ✅ Resolved — merged via `ADK_ENABLED` flag on `/interview` endpoint. Flow 1 is permanent fallback. |
 
 ---
 
