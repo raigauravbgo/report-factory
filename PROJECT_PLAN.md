@@ -151,14 +151,23 @@ report-factory/
 
 ---
 
-### ❌ Pending — Frontend Screens (PRD3 Section 8)
+### ✅ Complete — Frontend Screens
+
+| Item | Notes |
+|---|---|
+| Library / Home page (`/`) | Grid of all reports, status badges, template + status filters, New Report button |
+| Report Detail page (`/reports/[reportId]`) | Mapping confirmation table with confidence scores + override inputs |
+| Review Queue frontend (`/review-queue`) | List panel + detail panel, approve/reject with reviewer notes |
+| Mapping Confirmation | Inline in `/reports/[reportId]` — flags low-confidence items in amber |
+
+### ❌ Pending — Remaining Items
 
 | Item | Priority | Notes |
 |---|---|---|
-| Library / Home page — grid of all reports with status badges | High | Currently `/` is a 404; PRD requires this as the entry point |
-| Mapping Confirmation screen | High | Table: raw col → KPI → confidence score → override dropdown |
-| Review Queue frontend UI | High | List + detail + approve/reject/approve-with-edits; backend fully done |
-| `adk web` end-to-end trace verification | Medium | Set `ADK_ENABLED=true` and run a full loop to verify traces |
+| PPTX export | High | **Blocked — needs BGO `.pptx` slide master from Marketing** |
+| `adk web` trace verification | Medium | Run full loop with `ADK_ENABLED=true`, check traces at `localhost:8001` |
+| Multi-file support | Low | One Excel per report in MVP — deferred |
+| 3 pilot reports with real BGO data | Low | Operational task — run once Review Queue UI is exercised |
 
 ---
 
@@ -196,8 +205,8 @@ report-factory/
 | Dev can clone + run full app in < 1 hour | ⚠️ ~1.5 hrs currently | pip memory issue on Windows; needs better setup docs |
 | Agent completes full loop for 3 reports | ⚠️ ADK wired, needs real BGO data test | Set `ADK_ENABLED=true`, upload real Excel, complete full conversation |
 | Client Health Dashboard template renders | ⚠️ ADK active; template routing via agent instruction | ADK asks for template type — verify client_health renders correctly |
-| Review queue: approve, reject, approve-with-edits | ⚠️ Backend done | Frontend review queue UI missing |
-| Schema memory saves + skips mapping on second run | ⚠️ Saves on approve | Pre-fill in `run_data_discovery` not wired |
+| Review queue: approve, reject, approve-with-edits | ✅ Done | Frontend at `/review-queue` — list, detail, approve/reject with notes |
+| Schema memory saves + skips mapping on second run | ✅ Done | Pre-fill implemented in `run_data_discovery` — uses stored mapping if all columns present |
 | PPTX export produces valid file | ❌ Not done | BGO `.pptx` slide master file required |
 | ADK traces visible in `adk web` for every step | ❌ Not done | Needs end-to-end test |
 | Platform reusability gate (Hunter Point + voice) | ❌ Not done | Paper review pending |

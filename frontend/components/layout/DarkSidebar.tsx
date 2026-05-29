@@ -4,8 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
+  { label: "Library", href: "/", icon: "▦" },
   { label: "Upload", href: "/upload", icon: "↑" },
-  { label: "Reports", href: "/", icon: "▦" },
+  { label: "Review Queue", href: "/review-queue", icon: "✓" },
 ];
 
 export default function DarkSidebar() {

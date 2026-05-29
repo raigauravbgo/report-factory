@@ -6,7 +6,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from db.database import get_kpi_catalog, get_report, update_report
+from db.database import get_kpi_catalog, get_report, get_schema_memory, update_report
 
 
 def _fuzzy_score(a: str, b: str) -> float:
@@ -46,6 +46,29 @@ def run_data_discovery(request_id: str, file_path: str) -> dict:
     headers = list(df.columns)
     sample = df.head(3).to_dict(orient="records")
     row_count = len(full_df)
+
+    # Check schema memory — skip fuzzy match if approved mapping exists for this client+template
+    client_id = intake_spec.get("client_id", "")
+    template_type = intake_spec.get("template_type", "")
+    memory = get_schema_memory(client_id, template_type) if client_id and template_type else None
+
+    if memory:
+        stored: dict = memory.get("mappings", {})
+        # Validate stored columns still exist in this file's headers
+        valid = {kpi: m for kpi, m in stored.items() if m.get("raw_column") in headers}
+        if len(valid) == len(kpi_list):
+            column_mapping = {kpi: {**m, "source": "schema_memory"} for kpi, m in valid.items()}
+            update_report(request_id, file_path=file_path, column_mapping=column_mapping, status="awaiting_mapping_confirmation")
+            return {
+                "status": "data_discovery_complete",
+                "source": "schema_memory",
+                "headers": headers,
+                "row_count": row_count,
+                "sample": sample,
+                "column_mapping": column_mapping,
+                "needs_review_count": 0,
+                "message": "Schema memory found — previous approved mapping applied. Confirm to proceed (or adjust if headers changed).",
+            }
 
     # Fuzzy-match headers → KPI source fields
     catalog = get_kpi_catalog()
