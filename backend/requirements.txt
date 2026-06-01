@@ -15,6 +15,9 @@ anthropic>=0.30.0
 pandas==3.0.3
 openpyxl==3.1.5
 
+# Export
+python-pptx>=0.6.21         # PPTX generation — place bgo_slide_master.pptx in exporters/ to activate BGO branding
+
 # Storage (legacy upload route — local fallback active)
 boto3==1.35.28
 

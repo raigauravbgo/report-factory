@@ -120,3 +120,46 @@ def export_excel(recipe_id: int, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=dashboard_recipe_{recipe_id}.xlsx"},
     )
+
+
+@router.get("/{recipe_id}/export/pptx")
+def export_pptx(recipe_id: int, db: Session = Depends(get_db)):
+    from exporters.pptx_exporter import generate_pptx
+
+    recipe, config, staging = _get_recipe_and_staging(recipe_id, db)
+    try:
+        result = compute_dashboard(config, staging.table_name)
+    except Exception as e:
+        raise HTTPException(500, f"Computation failed: {e}")
+
+    dashboard_data = {
+        "template_type": config.get("granularity", ""),
+        "client_id": f"Recipe #{recipe_id}",
+        "period_start": None,
+        "period_end": None,
+        "kpi_tiles": [
+            {
+                "kpi_id": k["name"],
+                "display_name": k["name"].replace("_", " ").title(),
+                "value": k["value"],
+                "format": "percentage" if "/" in k["formula"] else "integer",
+                "flags": [],
+            }
+            for k in result["kpi_summaries"]
+        ],
+        "charts": [
+            {**ts, "type": "line"}
+            for ts in result["time_series"]
+        ] + [
+            {**bk, "type": "bar", "title": f"{bk['kpi']} by {bk['dimension']}"}
+            for bk in result["breakdown"]
+        ],
+        "data_quality_flags": [],
+    }
+
+    pptx_bytes = generate_pptx(dashboard_data)
+    return StreamingResponse(
+        io.BytesIO(pptx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f"attachment; filename=dashboard_recipe_{recipe_id}.pptx"},
+    )

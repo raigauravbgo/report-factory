@@ -44,6 +44,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [exportingPptx, setExportingPptx] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -73,6 +74,22 @@ export default function DashboardPage() {
       URL.revokeObjectURL(url);
     } catch (e) { setError(String(e)); }
     finally { setExporting(false); }
+  }
+
+  async function handleExportPptx() {
+    setExportingPptx(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/dashboard/${recipeId}/export/pptx`);
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dashboard_recipe_${recipeId}.pptx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError(String(e)); }
+    finally { setExportingPptx(false); }
   }
 
   if (loading) return (
@@ -110,6 +127,13 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={handleExportPptx}
+            disabled={exportingPptx}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            ↓ {exportingPptx ? "Exporting…" : "Export PPTX"}
+          </button>
           <button
             onClick={handleExport}
             disabled={exporting}
