@@ -1,30 +1,30 @@
 # Core API
-fastapi==0.124.1
-uvicorn[standard]==0.34.0
+fastapi==0.136.1
+uvicorn[standard]==0.47.0
 pydantic==2.13.4
-pydantic-settings==2.5.2
-python-multipart==0.0.12
+pydantic-settings==2.14.1
+python-multipart==0.0.29
 httpx==0.28.1
 
 # Agent
-google-adk>=1.0.0
-litellm                 # required for google-adk LiteLlm model (OpenAI/any provider via ADK)
-anthropic>=0.30.0
+google-adk==2.1.0
+litellm==1.85.0
+anthropic==0.105.2
 
 # Data
-pandas==3.0.3
+pandas==2.3.0
 openpyxl==3.1.5
 
 # Export
-python-pptx>=0.6.21         # PPTX generation — place bgo_slide_master.pptx in exporters/ to activate BGO branding
+python-pptx==1.0.2
 
 # Storage (legacy upload route — local fallback active)
-boto3==1.35.28
+boto3>=1.35.0
 
 # Legacy SQLAlchemy layer (existing upload/interview routes)
-sqlalchemy==2.0.35
-alembic==1.13.3
-cryptography==43.0.1
-python-jose[cryptography]==3.3.0
-openai==2.38.0
-asteval==1.0.5
+sqlalchemy==2.0.49
+alembic==1.18.4
+cryptography==48.0.0
+python-jose[cryptography]==3.5.0
+openai==2.37.0
+asteval==1.0.8
