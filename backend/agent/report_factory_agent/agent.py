@@ -24,7 +24,13 @@ def _resolve_model():
         return settings.adk_model  # ADK handles Anthropic natively
     # Default: OpenAI via LiteLLM
     import os
-    os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
+    import litellm as _litellm
+    # Read key from settings (pydantic reads .env via absolute path — works in all contexts)
+    # Also fall back to what's already in the OS environment (covers $env:OPENAI_API_KEY manual set)
+    key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+    if key:
+        os.environ["OPENAI_API_KEY"] = key   # force-set so adk web picks it up
+        _litellm.openai_key = key             # set directly on litellm to avoid timing issues
     return LiteLlm(model=f"openai/{settings.adk_model}")
 
 
