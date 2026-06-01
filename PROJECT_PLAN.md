@@ -44,10 +44,16 @@ POST /upload → poll GET /upload/{id} → GET /upload/{id}/profile
 
 ### ✅ Flow 2 — ADK Agent (active when ADK_ENABLED=true)
 Same `/interview` endpoint, ADK agent primary, auto-falls back to Flow 1 on failure.
+On first turn the agent receives column profile + upload_id; at Step 2 it calls
+`run_data_discovery_from_upload(upload_id)` to get fuzzy-matched KPI suggestions.
 ```
 POST /interview (ADK_ENABLED=true)
+  → inject [FILE UPLOADED] context (columns, upload_id, date/dim/measure groups)
   → adk_runner.run_turn() → root_agent (LiteLLM/OpenAI or Claude)
-  → run_intake → run_data_discovery (schema memory pre-fill)
+  → run_intake (template + KPI selection, suggests based on column context)
+  → run_data_discovery_from_upload(upload_id) ← NEW: uses staged profile, no re-parse
+      fuzzy-matches all columns vs full 69-KPI catalog, returns confidence scores
+      agent presents suggestions, user confirms/corrects before proceeding
   → run_standardise → run_generate → review_queue
 ```
 
@@ -66,9 +72,10 @@ report-factory/
 │   │       └── tools/
 │   │           ├── define_kpi.py            ✅ User-defined KPI (reviewed=false)
 │   │           ├── intake.py                ✅ Template + KPI validation → intake_spec
-│   │           ├── data_discovery.py        ✅ Schema memory pre-fill → fuzzy column mapping
-│   │           ├── standardise.py           ✅ KPI compute + range validation + flags
-│   │           └── generate.py              ✅ Chart JSON + review queue entry
+│   │           ├── data_discovery.py              ✅ Schema memory pre-fill → fuzzy column mapping (pure Flow 2)
+│   │           ├── data_discovery_from_upload.py  ✅ NEW — Flow 1→2 bridge: staged profile → 69-KPI fuzzy match
+│   │           ├── standardise.py                 ✅ KPI compute + range validation + flags
+│   │           └── generate.py                    ✅ Chart JSON + review queue entry
 │   ├── api/routes/
 │   │   ├── upload.py                        ✅ POST /upload, GET /upload/{id}, GET /upload/{id}/profile
 │   │   ├── interview.py                     ✅ POST /interview (ADK+fallback), recipe CRUD + approve
@@ -172,17 +179,20 @@ report-factory/
 |---|---|
 | `run_intake` | Template + KPI validation, writes intake_spec |
 | `run_define_new_kpi` | User-defined KPI, reviewed=false |
-| `run_data_discovery` | Schema memory pre-fill → fuzzy fallback if no match |
+| `run_data_discovery` | Schema memory pre-fill → fuzzy fallback (pure ADK / `adk web` path) |
+| `run_data_discovery_from_upload` | **NEW** — Flow 1→2 bridge; loads staged profile, fuzzy-matches all columns vs 69-KPI catalog, returns confidence-scored suggestions grouped ✅ high / ⚠️ review |
 | `run_standardise` | KPI compute + range validation + data quality flags |
 | `run_generate` | Chart JSON + review queue entry |
-| ADK wired into `/interview` | `adk_runner.py` — session management, ADK 2.x fix |
+| ADK wired into `/interview` | `adk_runner.py` — session management, ADK 2.x session creation fix |
+| Column profile injected on first turn | Agent receives upload_id + all column names + date/dim/measure groupings |
 | OpenAI fallback | Auto-falls back on any ADK failure, logged as warning |
 | `ADK_ENABLED` flag | `.env` only — no code change to switch |
 | `ADK_PROVIDER` flag | `openai` (LiteLLM) or `anthropic` (Claude) — `.env` only |
-| `OPENAI_API_KEY` force-set | Fixed `setdefault` → force-set so `adk web` works |
+| `OPENAI_API_KEY` auto-resolved | Force-set from `.env` + `litellm.openai_key` — no manual `$env:` needed |
+| `agent/__init__.py` exports `root_agent` | Required by `adk web` discovery — was missing, now fixed |
 | Review queue API | List, approve, reject, promote KPIs, schema memory save |
 | Schema memory pre-fill | Skips fuzzy match on 2nd run if stored mapping exists + headers match |
-| KPI catalog API | Full CRUD + reviewed flag |
+| KPI catalog API | Full CRUD + reviewed flag — adding KPIs to catalog auto-improves suggestions |
 
 ---
 
@@ -213,9 +223,9 @@ report-factory/
 
 | Item | Action |
 |---|---|
-| ~~`adk web` trace verification~~ | ✅ Fixed — `agent/__init__.py` now exports `root_agent`; `OPENAI_API_KEY` auto-resolved from `.env`. Run `cd backend && adk web --port 8001` — no manual key needed |
-| 3 pilot reports with real BGO data | Schedule session with ops team + data team reviewer; use `/review-queue` to approve |
+| ~~`adk web` trace verification~~ | ✅ Fixed — `agent/__init__.py` exports `root_agent`; `OPENAI_API_KEY` auto-resolved from `.env`. Run `cd backend && adk web --port 8001` |
 | ~~Setup time < 1 hour~~ | ✅ README.md written — Windows batch install workaround, step-by-step guide, 6 troubleshooting scenarios |
+| 3 pilot reports with real BGO data | Schedule session with ops team + data team reviewer; use `/review-queue` to approve |
 
 ---
 
@@ -283,8 +293,8 @@ GET    /health                                  ✅ Health check
 | Gate | Status | Notes |
 |---|---|---|
 | Dev can clone + run in < 1 hour | ✅ Done | README.md covers Windows batch install, step-by-step setup, troubleshooting |
-| Agent completes full loop for 3 reports | ⚠️ ADK wired | Needs real BGO data test with `ADK_ENABLED=true` |
-| Client Health Dashboard template renders | ⚠️ Working | Verify template routing via ADK agent conversation |
+| Agent completes full loop for 3 reports | ⚠️ ADK wired + data-aware | Agent now sees column profile + gets KPI suggestions via `run_data_discovery_from_upload`; needs real BGO data test |
+| Client Health Dashboard template renders | ⚠️ Working | Agent suggests template-relevant KPIs based on detected columns |
 | Review queue: approve / reject / override | ✅ Done | Frontend at `/review-queue` |
 | Schema memory skips mapping on 2nd run | ✅ Done | `run_data_discovery` pre-fill implemented |
 | PPTX export produces valid file | ⚠️ Code done | Place `bgo_slide_master.pptx` → BGO branding active |
@@ -310,6 +320,25 @@ GET    /health                                  ✅ Health check
 | 10 | ~~Self-hosted Langfuse or cloud?~~ | Platform lead | ✅ Langfuse Cloud free tier |
 | 11 | Typical number of Excel files per report? | Ops users | Informs multi-file UX (deferred) |
 | 12 | ~~Should Flow 1 and Flow 2 merge into one UX?~~ | Product lead | ✅ Resolved — merged via `ADK_ENABLED` flag |
+
+---
+
+## Bugs Fixed / Corrections Made
+
+| Bug | Root Cause | Fix |
+|---|---|---|
+| `fastapi==0.115.0` conflict with `google-adk` | `google-adk` requires `fastapi>=0.124.1` | Bumped fastapi + uvicorn versions |
+| `infer_datetime_format` KeyError | Removed in pandas 2.0+ | Replaced with `format="mixed"` |
+| `pd.Timestamp` not JSON serializable | Missing type handling in `_serialize()` | Added `pd.Timestamp.isoformat()` branch |
+| `db.get_bind()` broken | Deprecated in SQLAlchemy 2.0 | Replaced with direct `engine` import |
+| SQLAlchemy tables not created on startup | `Base.metadata.create_all()` never called | Added to `main.py` startup |
+| `mean(avg_csat_rating)` computed as sum | `formula_agg()` didn't detect `mean()` pattern | Added `_MEAN_RE` regex detection |
+| `agent/__init__.py` empty — `adk web` 500 error | ADK discovery searches `agent.root_agent` | Added `from .report_factory_agent import root_agent` |
+| `OPENAI_API_KEY` not picked up by `adk web` | `setdefault` doesn't override existing empty key | Changed to force-set + `litellm.openai_key = key` |
+| ADK agent unaware of uploaded file columns | Column profile never sent to agent session | Injected `[FILE UPLOADED]` context on first turn |
+| ADK agent can't call `run_data_discovery` in hybrid flow | Tool needs `request_id` + `file_path`, not `upload_id` | Built `run_data_discovery_from_upload(upload_id)` bridge tool |
+| Dashboard FilterBar options hardcoded "All" | No endpoint to fetch distinct column values | Added `GET /api/dashboard/{id}/filter-values` + backend filtering |
+| Filter returning empty results crashed full page | Error state replaced entire dashboard | Separated `filterError` from page `error`; added empty state |
 
 ---
 
