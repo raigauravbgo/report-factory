@@ -1,14 +1,14 @@
 import io
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from core.database import get_db
 from models.report_recipe import ReportRecipe
 from models.staging_table import StagingTable
-from services.compute import compute_dashboard
+from services.compute import compute_dashboard, get_filter_options
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -27,16 +27,37 @@ def _get_recipe_and_staging(recipe_id: int, db: Session):
     return recipe, config, staging
 
 
-@router.get("/{recipe_id}/data")
-def get_dashboard_data(recipe_id: int, db: Session = Depends(get_db)):
+@router.get("/{recipe_id}/filter-values")
+def get_dashboard_filter_values(recipe_id: int, db: Session = Depends(get_db)):
+    """Return distinct values for each dimension and filter column — used to populate FilterBar dropdowns."""
     recipe, config, staging = _get_recipe_and_staging(recipe_id, db)
+    cols = list(set(config.get("dimensions", []) + config.get("filters", [])))
     try:
-        result = compute_dashboard(config, staging.table_name)
+        options = get_filter_options(staging.table_name, cols)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to load filter values: {e}")
+    return options
+
+
+@router.get("/{recipe_id}/data")
+def get_dashboard_data(recipe_id: int, request: Request, db: Session = Depends(get_db)):
+    recipe, config, staging = _get_recipe_and_staging(recipe_id, db)
+
+    # Extract active filters from query params (exclude the recipe_id path param)
+    reserved = {"recipe_id"}
+    active_filters = {
+        k: v for k, v in request.query_params.items()
+        if k not in reserved and v
+    }
+
+    try:
+        result = compute_dashboard(config, staging.table_name, filters=active_filters or None)
     except Exception as e:
         raise HTTPException(500, f"Computation failed: {e}")
     return {
         "recipe_id": recipe_id,
         "config": config,
+        "active_filters": active_filters,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         **result,
     }

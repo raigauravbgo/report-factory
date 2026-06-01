@@ -75,14 +75,35 @@ def _eval_formula(df: pd.DataFrame, formula: str) -> pd.Series:
     return pd.Series(dtype=float)
 
 
-def compute_dashboard(recipe_config: dict, staging_table_name: str) -> dict:
+def get_filter_options(staging_table_name: str, columns: list[str]) -> dict[str, list[str]]:
+    """Return distinct sorted values for each requested column (used to populate FilterBar dropdowns)."""
+    df = _load_staging_df(staging_table_name)
+    result: dict[str, list[str]] = {}
+    for col in columns:
+        if col in df.columns:
+            vals = df[col].dropna().astype(str).unique().tolist()
+            result[col] = sorted(vals)[:100]  # cap at 100 options per filter
+    return result
+
+
+def compute_dashboard(recipe_config: dict, staging_table_name: str,
+                      filters: dict[str, str] | None = None) -> dict:
     """
     Given a recipe config and the staging table name, compute KPI time series.
+    Optional filters dict applies row-level filtering before all computations.
     Returns chart-ready JSON: { kpi_summaries, time_series, breakdown }
     """
     df = _load_staging_df(staging_table_name)
     if df.empty:
         return {"kpi_summaries": [], "time_series": [], "breakdown": []}
+
+    # Apply row-level filters (dimension/filter column = selected value)
+    if filters:
+        for col, val in filters.items():
+            if val and col in df.columns:
+                df = df[df[col].astype(str) == val]
+        if df.empty:
+            return {"kpi_summaries": [], "time_series": [], "breakdown": [], "insights": []}
 
     date_col = recipe_config.get("date_column")
     granularity = recipe_config.get("granularity", "monthly")

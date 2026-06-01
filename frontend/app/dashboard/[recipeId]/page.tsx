@@ -41,24 +41,44 @@ export default function DashboardPage() {
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
+  const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filtering, setFiltering] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportingPptx, setExportingPptx] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
 
+  // Initial load — recipe metadata + filter option values
   useEffect(() => {
     Promise.all([
-      fetch(`${BASE_URL}/api/dashboard/${recipeId}/data`).then((r) => {
-        if (!r.ok) throw new Error(`API ${r.status}`);
-        return r.json() as Promise<DashboardData>;
-      }),
       api.getRecipe(Number(recipeId)),
+      fetch(`${BASE_URL}/api/dashboard/${recipeId}/filter-values`).then((r) => r.ok ? r.json() : {}),
     ])
-      .then(([dashData, recipe]) => { setData(dashData); setApprovedAt(recipe.approved_at); })
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+      .then(([recipe, opts]) => {
+        setApprovedAt(recipe.approved_at);
+        setFilterOptions(opts as Record<string, string[]>);
+      })
+      .catch(() => {});
   }, [recipeId]);
+
+  // Fetch dashboard data — re-runs whenever activeFilters changes
+  useEffect(() => {
+    const params = new URLSearchParams();
+    Object.entries(activeFilters).forEach(([k, v]) => { if (v) params.set(k, v); });
+    const url = `${BASE_URL}/api/dashboard/${recipeId}/data${params.size ? `?${params}` : ""}`;
+
+    setFiltering(true);
+    fetch(url)
+      .then((r) => { if (!r.ok) throw new Error(`API ${r.status}`); return r.json() as Promise<DashboardData>; })
+      .then((d) => { setData(d); setError(null); })
+      .catch((e) => setError(String(e)))
+      .finally(() => { setLoading(false); setFiltering(false); });
+  }, [recipeId, activeFilters]);
+
+  function handleFilterChange(key: string, value: string) {
+    setActiveFilters((prev) => ({ ...prev, [key]: value }));
+  }
 
   async function handleExport() {
     setExporting(true);
@@ -155,8 +175,16 @@ export default function DashboardPage() {
         dimensions={config.dimensions}
         filters={config.filters}
         activeFilters={activeFilters}
-        onFilterChange={(k, v) => setActiveFilters((prev) => ({ ...prev, [k]: v }))}
+        filterOptions={filterOptions}
+        onFilterChange={handleFilterChange}
       />
+      {/* Filtering indicator */}
+      {filtering && (
+        <div className="flex items-center gap-2 bg-teal-50 border-b border-teal-100 px-6 py-2 text-xs text-teal-700">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#00B5AD] border-t-transparent" />
+          Applying filter…
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 p-6 space-y-8">
