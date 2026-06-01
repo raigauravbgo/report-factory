@@ -43,6 +43,7 @@ export default function DashboardPage() {
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
   const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
+  const [filterError, setFilterError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filtering, setFiltering] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -69,11 +70,21 @@ export default function DashboardPage() {
     const url = `${BASE_URL}/api/dashboard/${recipeId}/data${params.size ? `?${params}` : ""}`;
 
     setFiltering(true);
+    setFilterError(null);
     fetch(url)
       .then((r) => { if (!r.ok) throw new Error(`API ${r.status}`); return r.json() as Promise<DashboardData>; })
-      .then((d) => { setData(d); setError(null); })
-      .catch((e) => setError(String(e)))
+      .then((d) => {
+        setData(d);
+        // If initial load (no data yet), clear full-page error too
+        if (!data) setError(null);
+      })
+      .catch((e) => {
+        // If we already have data, show inline error instead of full-page crash
+        if (data) setFilterError(String(e));
+        else setError(String(e));
+      })
       .finally(() => { setLoading(false); setFiltering(false); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recipeId, activeFilters]);
 
   function handleFilterChange(key: string, value: string) {
@@ -178,16 +189,36 @@ export default function DashboardPage() {
         filterOptions={filterOptions}
         onFilterChange={handleFilterChange}
       />
-      {/* Filtering indicator */}
+      {/* Filter status banners */}
       {filtering && (
         <div className="flex items-center gap-2 bg-teal-50 border-b border-teal-100 px-6 py-2 text-xs text-teal-700">
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#00B5AD] border-t-transparent" />
           Applying filter…
         </div>
       )}
+      {filterError && !filtering && (
+        <div className="flex items-center justify-between bg-red-50 border-b border-red-200 px-6 py-2 text-xs text-red-700">
+          <span>⚠ Filter error: {filterError}</span>
+          <button onClick={() => setFilterError(null)} className="ml-4 text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 p-6 space-y-8">
+
+        {/* Empty state when filters return no data */}
+        {!filtering && kpi_summaries.length === 0 && Object.values(activeFilters).some(Boolean) && (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div className="text-4xl text-gray-200">◎</div>
+            <p className="text-sm font-medium text-gray-500">No data matches the selected filters.</p>
+            <button
+              onClick={() => setActiveFilters({})}
+              className="text-sm text-[#00B5AD] underline"
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
 
         {/* KPI scorecards */}
         <section className="space-y-3">
