@@ -2,257 +2,292 @@
 
 ## Strategic Context
 
-This is the first surface of the BGO AI Platform. The KPI catalog, schema memory data model, and ADK skill manifest pattern built here become the foundation every subsequent agent inherits — Hunter Point Capital's deal workflow, the voice collections agent, internal ops automation. Treat the catalog format and schema memory schema as public API: versioned, reviewed, intentional. Getting these right in the MVP costs nothing extra. Unwinding them after five agents inherit from them is expensive.
+This is the first surface of the BGO AI Platform. The KPI catalog, schema memory data model, and ADK skill manifest pattern built here become the foundation every subsequent agent inherits — Hunter Point Capital's deal workflow, the voice collections agent, internal ops automation. Treat the catalog format and schema memory schema as public API: versioned, reviewed, intentional.
 
 ---
 
-## Resolved Stack
+## Resolved Stack (Actual — diverges from PRD3 in some areas)
 
-| Layer | MVP | Production |
-|---|---|---|
-| Backend | FastAPI (Python) | Same — deployed as Railway service |
-| Database | SQLite | PostgreSQL via Railway plugin — change one `DATABASE_URL` line |
-| Agent | Google ADK 1.32.0 local (`pip install google-adk`) | ADK on Railway — same code, `adk api_server` as Railway start command |
-| LLM | Claude via Anthropic API (`claude-sonnet-4-20250514`) | Same |
-| Observability | `adk web` local trace UI (built-in, zero setup) | Langfuse Cloud (managed, free tier 50k events/month) — swap 3 env vars |
-| Frontend | Next.js App Router — Vite migration deferred indefinitely | Same |
-| Charts | Recharts | Same |
-| Export | OpenPyXL (Excel ✅) · python-pptx against BGO slide master (❌ pending) | Same |
-| Column matching | `difflib.SequenceMatcher` fuzzy match | pgvector semantic search |
-| File storage | Local `/local_uploads` | Railway Volume — `UPLOAD_DIR` env var points to volume mount, no code change |
-| ETL / transforms | pandas in-memory per report | dbt Core (deferred — introduce when second data source joins) |
-| Auth | None | BGO SSO (SAML/OAuth2) |
-| Secrets | `.env` file | Railway environment variables |
+| Layer | Built | PRD3 Spec | Notes |
+|---|---|---|---|
+| Backend | FastAPI (Python) | FastAPI | ✅ Match |
+| Database | SQLite (dev) | SQLite | ✅ Match — PostgreSQL in production |
+| Agent | Google ADK 2.1.0 | Google ADK | ✅ Match (newer version) |
+| LLM (default) | **OpenAI gpt-4o-mini** | Claude (Anthropic) | ⚠️ Diverged — OpenAI is default; Claude opt-in via `ADK_PROVIDER=anthropic` |
+| ADK model switch | `ADK_PROVIDER` + `ADK_MODEL` in `.env` | Not in spec | ➕ Added |
+| Observability | `adk web` (local) | `adk web` | ✅ Match |
+| Frontend | **Next.js 16 App Router** | React + Vite | ⚠️ Diverged — Vite migration deferred indefinitely |
+| Frontend port | **3000** | 5173 | ⚠️ Diverged |
+| Charts | Recharts | Recharts | ✅ Match |
+| Export | Excel (openpyxl ✅) + PPTX (python-pptx ✅ code built, ⏳ needs slide master) | python-pptx | ✅ Match (code done) |
+| Column matching | `difflib.SequenceMatcher` fuzzy | SQLite FTS5 | ⚠️ Minor — functionally equivalent |
+| File storage | Local `/local_uploads` | Local `/uploads` | ✅ Match |
+| Auth | None (MVP) | None | ✅ Match |
+| Secrets | `.env` file | `.env` file | ✅ Match |
 
 ---
 
 ## Two Flows in This Codebase
 
-> **Architecture note:** Both flows share the same `/interview` endpoint. `ADK_ENABLED=true` in `.env` activates the ADK agent; `ADK_ENABLED=false` (default) uses OpenAI. Flow 1 is always the automatic fallback.
+> **Both flows share the `/interview` endpoint.** `ADK_ENABLED=true` activates ADK agent; `ADK_ENABLED=false` (default) uses OpenAI. Flow 1 is always the automatic fallback if ADK fails.
 
 ### ✅ Flow 1 — Self-Service (Upload → Profile → Interview → Recipe → Dashboard)
-Uses OpenAI for the interview. Fully working end-to-end. Default when `ADK_ENABLED=false`.
+Default flow. Uses OpenAI. Fully working end-to-end.
 ```
-POST /upload → GET /upload/{id} (poll) → GET /upload/{id}/profile
-  → POST /interview (OpenAI chat turns)
+POST /upload → poll GET /upload/{id} → GET /upload/{id}/profile
+  → POST /interview (OpenAI, ADK_ENABLED=false)
   → POST /interview/recipe → POST /interview/recipe/{id}/approve
-  → GET /api/dashboard/{id}/data → GET /api/dashboard/{id}/export/excel
+  → GET /api/dashboard/{id}/data
+  → GET /api/dashboard/{id}/export/excel
+  → GET /api/dashboard/{id}/export/pptx
 ```
 
-### ✅ Flow 2 — ADK Agent (wired into /interview, ADK_ENABLED=true)
-ADK agent activated via `ADK_ENABLED=true`. Falls back to Flow 1 on failure. Model switchable via `ADK_PROVIDER=openai|anthropic`.
+### ✅ Flow 2 — ADK Agent (active when ADK_ENABLED=true)
+Same `/interview` endpoint, ADK agent primary, auto-falls back to Flow 1 on failure.
 ```
 POST /interview (ADK_ENABLED=true)
   → adk_runner.run_turn() → root_agent (LiteLLM/OpenAI or Claude)
-  → run_intake → run_data_discovery → run_standardise → run_generate
-  → review_queue
+  → run_intake → run_data_discovery (schema memory pre-fill)
+  → run_standardise → run_generate → review_queue
 ```
 
 ---
 
-## Project Structure
+## Project Structure (Current State)
 
 ```
 report-factory/
 ├── backend/
-│   ├── main.py                          ✅ FastAPI — all routes, init_db() + seed on startup
+│   ├── main.py                              ✅ FastAPI app — routers, CORS, init_db(), seed on startup
 │   ├── agent/
 │   │   └── report_factory_agent/
-│   │       ├── agent.py                 ✅ Root ADK agent — 5 tools registered
+│   │       ├── agent.py                     ✅ Root ADK agent — LiteLlm(openai) or Anthropic via _resolve_model()
 │   │       └── tools/
-│   │           ├── define_kpi.py        ✅ New KPI definition (user-defined, reviewed=false)
-│   │           ├── intake.py            ✅ Step 1: template + KPI selection
-│   │           ├── data_discovery.py    ✅ Step 2: Excel parsing + fuzzy mapping
-│   │           ├── standardise.py       ✅ Step 3: KPI computation + validation
-│   │           └── generate.py          ✅ Step 4: chart JSON + review queue entry
+│   │           ├── define_kpi.py            ✅ User-defined KPI (reviewed=false)
+│   │           ├── intake.py                ✅ Template + KPI validation → intake_spec
+│   │           ├── data_discovery.py        ✅ Schema memory pre-fill → fuzzy column mapping
+│   │           ├── standardise.py           ✅ KPI compute + range validation + flags
+│   │           └── generate.py              ✅ Chart JSON + review queue entry
 │   ├── api/routes/
-│   │   ├── upload.py                    ✅ File upload + background profiling
-│   │   ├── interview.py                 ✅ ADK-primary + OpenAI fallback + recipe creation
-│   │   ├── kpis.py                      ✅ KPI catalog CRUD + review flag
-│   │   ├── reports.py                   ✅ ADK report lifecycle + review queue
-│   │   └── dashboard.py                 ✅ NEW — KPI computation + Excel export
+│   │   ├── upload.py                        ✅ POST /upload, GET /upload/{id}, GET /upload/{id}/profile
+│   │   ├── interview.py                     ✅ POST /interview (ADK+fallback), recipe CRUD + approve
+│   │   ├── kpis.py                          ✅ GET/POST /api/kpis, GET /api/kpis/{id}, POST review
+│   │   ├── reports.py                       ✅ /api/reports lifecycle + review queue (11 endpoints)
+│   │   └── dashboard.py                     ✅ /api/dashboard/{id}/data + export/excel + export/pptx
 │   ├── services/
-│   │   ├── compute.py                   ✅ NEW — formula evaluator, time series, breakdown, insights
-│   │   ├── adk_runner.py                ✅ NEW — ADK session runner, session creation, Flow 1 fallback
-│   │   ├── ai_interview.py              ✅ OpenAI 5-step interview engine (Flow 1 + fallback)
-│   │   ├── profiler.py                  ✅ Column type detection
-│   │   ├── parser.py                    ✅ Excel/CSV → SQLite staging table
-│   │   ├── recipe_generator.py          ✅ Interview result → RecipeConfig + chart layout
-│   │   └── storage.py                   ✅ Local file storage (S3-ready)
-│   ├── catalog/
-│   │   ├── kpis.json                    ✅ 69 KPI definitions (BGO IP — versioned)
-│   │   └── templates/                   ✅ 4 templates (client_health, wbr_qbr, exec_scorecard, kpi_spotlight)
-│   ├── db/
-│   │   ├── schema.sql                   ✅ SQLite schema — 5 tables (Flow 2 / ADK)
-│   │   └── database.py                  ✅ Raw sqlite3 helpers — no ORM
-│   ├── models/                          ✅ SQLAlchemy ORM models (Flow 1)
+│   │   ├── compute.py                       ✅ KPI formula engine, time series, breakdown, insights
+│   │   ├── adk_runner.py                    ✅ ADK session runner — ADK 2.x session creation, fallback
+│   │   ├── ai_interview.py                  ✅ OpenAI 5-step interview (Flow 1 + fallback)
+│   │   ├── ai_client.py                     ✅ OpenAI/Azure wrapper
+│   │   ├── profiler.py                      ✅ Column type detection
+│   │   ├── parser.py                        ✅ Excel/CSV → SQLite staging table
+│   │   ├── recipe_generator.py              ✅ InterviewResult → RecipeConfig + chart layout
+│   │   └── storage.py                       ✅ Local file storage (S3-ready)
 │   ├── exporters/
-│   │   └── pptx_exporter.py             ❌ NOT BUILT — python-pptx stub only
-│   └── seed_catalog.py                  ✅ Idempotent — auto-runs on every startup
-├── frontend/
-│   ├── app/
-│   │   ├── layout.tsx                   ✅ Root layout with DarkSidebar
-│   │   ├── upload/page.tsx              ✅ File upload with step indicator
-│   │   ├── profile/[uploadId]/page.tsx  ✅ Column profile review → interview
-│   │   ├── interview/page.tsx           ✅ Chat interview (ADK primary, OpenAI fallback)
-│   │   ├── recipe/[recipeId]/page.tsx   ✅ Recipe review + edit + approve
-│   │   └── dashboard/[recipeId]/page.tsx ✅ Full dashboard — KPI cards, charts, insights
-│   └── components/
-│       ├── layout/DarkSidebar.tsx       ✅ NEW — navy #1B2340 fixed sidebar
-│       ├── kpis/KpiSummaryCard.tsx      ✅ NEW — large value card with trend badge
-│       ├── ui/ChartCard.tsx             ✅ NEW — chart wrapper with takeaway sentence
-│       ├── ui/SectionHeader.tsx         ✅ NEW — teal left-border section label
-│       ├── ui/TrendBadge.tsx            ✅ NEW — up/down/flat pill indicator
-│       ├── ui/InsightPanel.tsx          ✅ NEW — executive insights (severity levels)
-│       └── filters/FilterBar.tsx        ✅ NEW — dimension/filter dropdowns
+│   │   ├── __init__.py                      ✅
+│   │   └── pptx_exporter.py                 ✅ PPTX deck (title + KPI tiles + charts + flags slides)
+│   │       └── bgo_slide_master.pptx        ⏳ NOT YET — place here when Marketing provides file
+│   ├── catalog/
+│   │   ├── kpis.json                        ✅ 69 BGO KPI definitions (collections, cx, sales, workforce)
+│   │   └── templates/                       ✅ 4 templates: client_health, wbr_qbr, exec_scorecard, kpi_spotlight
+│   ├── db/
+│   │   ├── schema.sql                       ✅ 5 tables: report_requests, kpi_catalog, schema_memory, review_queue, agent_log
+│   │   └── database.py                      ✅ Raw sqlite3 helpers
+│   ├── models/                              ✅ SQLAlchemy ORM (datasets, uploads, staging_tables, report_recipes, kpi_definitions)
+│   ├── core/
+│   │   ├── config.py                        ✅ Pydantic settings — DB, S3, OpenAI, ADK, Azure flags
+│   │   └── database.py                      ✅ SQLAlchemy engine + SessionLocal
+│   ├── migrations/                          ✅ Alembic migration (0001_initial_schema)
+│   ├── seed_catalog.py                      ✅ Idempotent KPI seeder — auto-runs on startup
+│   ├── requirements.txt                     ✅ Fully synced with installed versions
+│   └── .env.example                         ✅ Documents all flags incl. ADK_ENABLED, ADK_PROVIDER
+└── frontend/                                Next.js 16 App Router (not React + Vite as in PRD3)
+    ├── app/
+    │   ├── layout.tsx                       ✅ DarkSidebar + #F4F6FA bg
+    │   ├── page.tsx                         ✅ Library — report grid, status badges, template/status filters
+    │   ├── upload/page.tsx                  ✅ File upload with 5-step indicator
+    │   ├── profile/[uploadId]/page.tsx      ✅ Column type/role review before interview
+    │   ├── interview/page.tsx               ✅ 5-step chat (ADK primary, OpenAI fallback)
+    │   ├── recipe/[recipeId]/page.tsx       ✅ Recipe review, edit KPIs + mappings, approve
+    │   ├── dashboard/[recipeId]/page.tsx    ✅ KPI cards, line/bar charts, insights, Excel+PPTX export
+    │   ├── review-queue/page.tsx            ✅ List+detail panel, approve/reject with reviewer notes
+    │   └── reports/[reportId]/page.tsx      ✅ ADK report detail — mapping confirmation table, confidence scores
+    ├── components/
+    │   ├── layout/DarkSidebar.tsx           ✅ Navy #1B2340 — Library, Upload, Review Queue
+    │   ├── kpis/KpiSummaryCard.tsx          ✅ Large value card with optional trend badge
+    │   ├── ui/ChartCard.tsx                 ✅ Chart wrapper with takeaway sentence
+    │   ├── ui/SectionHeader.tsx             ✅ Teal left-border section label
+    │   ├── ui/TrendBadge.tsx                ✅ Up/down/flat pill indicator
+    │   ├── ui/InsightPanel.tsx              ✅ Executive insights (4 severity levels)
+    │   ├── filters/FilterBar.tsx            ✅ Dimension/filter dropdown bar
+    │   ├── ColumnTable.tsx                  ✅ Profile column review table
+    │   └── UploadZone.tsx                   ✅ Drag-drop upload area (react-dropzone)
+    └── lib/
+        ├── api.ts                           ✅ Typed API client (7 methods)
+        ├── types.ts                         ✅ All shared TypeScript interfaces
+        └── format.ts                        ✅ KPI value formatter (%, K, M, ratio)
 ```
 
 ---
 
-## Status by Area
+## Complete Status by Area
 
-### ✅ Complete — Flow 1 Self-Service
+### ✅ Done — Infrastructure & Setup
+
+| Item | Detail |
+|---|---|
+| Dependency conflicts fixed | fastapi 0.124.1, pydantic 2.13.4, uvicorn 0.34.0 — all synced |
+| SQLite auto-created on startup | `Base.metadata.create_all()` + `init_db()` both run |
+| KPI catalog auto-seeded on startup | 69 KPIs, idempotent |
+| `.env` structure clean | Root `.env` + `frontend/.env.local` + `backend/.env.example` |
+| `requirements.txt` fully synced | Matches exactly what's installed |
+| `litellm` added | Required for ADK LiteLlm OpenAI provider |
+| `python-pptx` added | PPTX generation |
+
+---
+
+### ✅ Done — Backend Flow 1 (Self-Service)
 
 | Feature | Notes |
 |---|---|
 | File upload (.xlsx/.csv ≤ 50MB) | Local storage, S3-ready |
 | Background column profiling | Type detection, missing %, sample values |
-| Profile review page | Column type/role review before interview |
 | OpenAI 5-step interview | Date column → KPIs → Dimensions → Granularity → Filters |
 | Recipe generation | KPIs, chart layout, column mappings |
-| Recipe review + approve/re-edit | Edit button unlocks after approval |
-| KPI formula computation | Handles ratio, mean(), sum(), plain column |
-| Time series chart data | Daily/weekly/monthly resampling |
-| Dimension breakdown chart data | Top-20 groups, bar chart |
-| Executive insights (auto-generated) | Finding→Narrative→Decision framework, 4 severity levels |
-| Dashboard page | KPI cards, line charts, bar charts, config summary |
+| Recipe approve + re-edit | Edit button unlocks after approval |
+| KPI formula computation | Handles ratio, mean(), sum(), plain column, SUM(col), mean(col) |
+| Time series resampling | Daily / weekly / monthly via pandas |
+| Dimension breakdown | Top-20 groups |
+| Executive insights | Finding→Narrative→Decision framework, 4 severity levels |
 | Excel export | 3 sheets: KPI Summary, Time Series, Breakdown |
-| KPI catalog auto-seeded on startup | 69 KPIs, idempotent |
-| Dark sidebar UI + design system | DarkSidebar, KpiSummaryCard, ChartCard, InsightPanel, FilterBar |
+| PPTX export (code) | Title + KPI tiles + chart slides + flags slide; BGO branding ready |
 
 ---
 
-### ✅ Complete — Flow 2 ADK Agent
+### ✅ Done — Backend Flow 2 (ADK Agent)
 
 | Feature | Notes |
 |---|---|
-| `run_intake` | Template + KPI validation, writes intake_spec to DB |
+| `run_intake` | Template + KPI validation, writes intake_spec |
 | `run_define_new_kpi` | User-defined KPI, reviewed=false |
-| `run_data_discovery` | Fuzzy column mapping via difflib, confidence scores |
+| `run_data_discovery` | Schema memory pre-fill → fuzzy fallback if no match |
 | `run_standardise` | KPI compute + range validation + data quality flags |
 | `run_generate` | Chart JSON + review queue entry |
-| Review queue API | List, approve (+ overrides + promote_kpis), reject, new-kpis |
-| Schema memory API | Save on approve, check endpoint |
-| KPI catalog API | CRUD + reviewed flag |
-| ADK wired into `/interview` | `services/adk_runner.py` — session management, ADK 2.x session creation fix |
-| OpenAI fallback | Auto-falls back to Flow 1 on any ADK failure; logged as warning |
-| Dynamic model provider | `ADK_PROVIDER=openai` (LiteLLM) or `ADK_PROVIDER=anthropic` (Claude) — `.env` only |
-| `ADK_ENABLED` flag | `false` = OpenAI only; `true` = ADK primary + fallback |
+| ADK wired into `/interview` | `adk_runner.py` — session management, ADK 2.x fix |
+| OpenAI fallback | Auto-falls back on any ADK failure, logged as warning |
+| `ADK_ENABLED` flag | `.env` only — no code change to switch |
+| `ADK_PROVIDER` flag | `openai` (LiteLLM) or `anthropic` (Claude) — `.env` only |
+| `OPENAI_API_KEY` force-set | Fixed `setdefault` → force-set so `adk web` works |
+| Review queue API | List, approve, reject, promote KPIs, schema memory save |
+| Schema memory pre-fill | Skips fuzzy match on 2nd run if stored mapping exists + headers match |
+| KPI catalog API | Full CRUD + reviewed flag |
 
 ---
 
-### ✅ Complete — Frontend Screens
+### ✅ Done — Frontend
 
-| Item | Notes |
+| Screen | Path | Notes |
+|---|---|---|
+| Library / Home | `/` | All reports grid, status badges, template + status filters |
+| Upload | `/upload` | 5-step indicator, drag-drop, polling |
+| Profile | `/profile/[uploadId]` | Column type/role review, override dropdowns |
+| Interview | `/interview` | 5-step chat, ADK primary / OpenAI fallback |
+| Recipe | `/recipe/[recipeId]` | Edit KPIs + column names, approve/re-approve |
+| Dashboard | `/dashboard/[recipeId]` | KPI cards, line/bar charts, insights, Excel+PPTX export |
+| Review Queue | `/review-queue` | List+detail, approve/reject, KPI table, flags |
+| Report Detail | `/reports/[reportId]` | ADK mapping table, confidence, overrides, confirm button |
+
+---
+
+### ⏳ Pending — Blocked on External Dependency
+
+| Item | Blocker | Action |
+|---|---|---|
+| PPTX BGO branding | BGO `.pptx` slide master from Marketing | Place file at `backend/exporters/bgo_slide_master.pptx` — no code change needed |
+
+---
+
+### ⏳ Pending — Operational Tasks (No Code Needed)
+
+| Item | Action |
 |---|---|
-| Library / Home page (`/`) | Grid of all reports, status badges, template + status filters, New Report button |
-| Report Detail page (`/reports/[reportId]`) | Mapping confirmation table with confidence scores + override inputs |
-| Review Queue frontend (`/review-queue`) | List panel + detail panel, approve/reject with reviewer notes |
-| Mapping Confirmation | Inline in `/reports/[reportId]` — flags low-confidence items in amber |
-
-### ❌ Pending — Remaining Items
-
-| Item | Priority | Notes |
-|---|---|---|
-| PPTX export | High | **Blocked — needs BGO `.pptx` slide master from Marketing** |
-| `adk web` trace verification | Medium | Run full loop with `ADK_ENABLED=true`, check traces at `localhost:8001` |
-| Multi-file support | Low | One Excel per report in MVP — deferred |
-| 3 pilot reports with real BGO data | Low | Operational task — run once Review Queue UI is exercised |
+| `adk web` trace verification | `cd backend && $env:OPENAI_API_KEY=... && adk web --port 8001` → select `agent` → test conversation |
+| 3 pilot reports with real BGO data | Schedule session with ops team + data team reviewer; use `/review-queue` to approve |
+| Setup time < 1 hour | Currently ~1.5 hrs on Windows — document pip workaround in README |
 
 ---
 
-### ❌ Pending — Multi-File Support
+### ⏳ Pending — Post-MVP / Deferred
 
-| Item | Priority | Notes |
-|---|---|---|
-| `report_files` table in `db/schema.sql` | Medium | One row per uploaded file per report |
-| `POST /api/reports/{id}/upload/done` | Medium | Signals all files uploaded, triggers discovery |
-| `GET /api/reports/{id}/files` | Medium | List uploaded files for a report |
-| `run_data_discovery` multi-file scan | Medium | Assign each KPI to best-matching source file |
-| `column_mapping` `source_file` field | Medium | `{kpi_id: {raw_column, source_file, confidence, needs_review}}` |
-| `run_standardise` multi-file read | Medium | Open correct file per KPI via `source_file` |
-| Schema memory multi-file recall | Low | Validate all referenced filenames present before pre-filling |
-
----
-
-### ❌ Pending — Export & Observability
-
-| Item | Priority | Notes |
-|---|---|---|
-| PPTX export (`exporters/pptx_exporter.py`) | High | **Blocked on BGO `.pptx` slide master file from Marketing** |
-| `GET /api/reports/{id}/pptx` stream endpoint | High | Depends on above |
-| PPTX download button on Dashboard | Medium | Excel button exists; PPTX button to be added alongside |
-| Schema memory pre-fill in `run_data_discovery` | Medium | Check schema_memory on start → skip fuzzy if match found |
-| ADK traces in `adk web` with latency | Medium | Zero setup once `ANTHROPIC_API_KEY` is set correctly |
-| Langfuse integration | Low | Production only — swap `agent_log` writes |
+| Item | When |
+|---|---|
+| Multi-file support (2+ Excel per report) | When a real user requests it |
+| Platform reusability gate (Hunter Point + voice agent) | Paper review before MVP locks |
+| Langfuse integration | Production only — swap `agent_log` writes |
+| pgvector semantic column matching | Production upgrade — replace `difflib.SequenceMatcher` |
+| BGO SSO (SAML/OAuth2) | Production only |
+| Scheduled refresh | Explicitly out of MVP scope |
 
 ---
 
-### ❌ Pending — Pilot & MVP Exit Gate
-
-| Gate | Status | Blocker |
-|---|---|---|
-| Dev can clone + run full app in < 1 hour | ⚠️ ~1.5 hrs currently | pip memory issue on Windows; needs better setup docs |
-| Agent completes full loop for 3 reports | ⚠️ ADK wired, needs real BGO data test | Set `ADK_ENABLED=true`, upload real Excel, complete full conversation |
-| Client Health Dashboard template renders | ⚠️ ADK active; template routing via agent instruction | ADK asks for template type — verify client_health renders correctly |
-| Review queue: approve, reject, approve-with-edits | ✅ Done | Frontend at `/review-queue` — list, detail, approve/reject with notes |
-| Schema memory saves + skips mapping on second run | ✅ Done | Pre-fill implemented in `run_data_discovery` — uses stored mapping if all columns present |
-| PPTX export produces valid file | ❌ Not done | BGO `.pptx` slide master file required |
-| ADK traces visible in `adk web` for every step | ❌ Not done | Needs end-to-end test |
-| Platform reusability gate (Hunter Point + voice) | ❌ Not done | Paper review pending |
-| 3 pilot reports with real BGO Excel data | ❌ Not done | Flow 2 must be wired up first |
-
----
-
-## API Routes — Current State
+## API Routes — Complete Current State
 
 ```
-# ── Flow 1 — Self-Service (fully working) ─────────────────────────────────
-POST   /upload                              ✅ File upload → background profile
-GET    /upload/{id}                         ✅ Poll profiling status
-GET    /upload/{id}/profile                 ✅ Column profile data
-POST   /interview                           ✅ ADK agent primary (OpenAI fallback) — ADK_ENABLED flag
-POST   /interview/recipe                    ✅ Generate recipe from interview result
-GET    /interview/recipe/{id}               ✅ Get recipe config
-POST   /interview/recipe/{id}/approve       ✅ Approve / re-approve recipe
-GET    /api/dashboard/{id}/data             ✅ Compute KPIs + chart data + insights
-GET    /api/dashboard/{id}/export/excel     ✅ Download formatted Excel (3 sheets)
+# ── Flow 1 — Self-Service ──────────────────────────────────────────────────
+POST   /upload                                  ✅ Upload file → background profile
+GET    /upload/{id}                             ✅ Poll profiling status
+GET    /upload/{id}/profile                     ✅ Column profile data
+POST   /interview                               ✅ ADK primary + OpenAI fallback (ADK_ENABLED flag)
+POST   /interview/recipe                        ✅ Generate recipe from interview result
+GET    /interview/recipe/{id}                   ✅ Get recipe config
+POST   /interview/recipe/{id}/approve           ✅ Approve / re-approve recipe
+GET    /api/dashboard/{id}/data                 ✅ Compute KPIs + charts + insights (generated_at)
+GET    /api/dashboard/{id}/export/excel         ✅ Download Excel (3 sheets)
+GET    /api/dashboard/{id}/export/pptx          ✅ Download PPTX (code built; BGO branding pending slide master)
 
-# ── Flow 2 — ADK Agent (backend built, no frontend connection) ─────────────
-POST   /api/reports/                        ✅ Create report request
-GET    /api/reports/                        ✅ List reports (filter by created_by)
-GET    /api/reports/{id}                    ✅ Get state + chat history
-POST   /api/reports/{id}/upload             ✅ Upload one file
-POST   /api/reports/{id}/confirm-mapping    ✅ Accept/override column mapping
-GET    /api/reports/{id}/dashboard          ✅ Computed KPIs + chart JSON
-GET    /api/reports/{id}/schema-memory      ✅ Check if stored mapping exists
-GET    /api/reports/review-queue/list       ✅ List review queue (filter by status)
-GET    /api/reports/review-queue/{id}/new-kpis ✅ User-defined KPIs pending review
-POST   /api/reports/review-queue/{id}/approve  ✅ Approve + save schema memory
-POST   /api/reports/review-queue/{id}/reject   ✅ Reject with reviewer notes
+# ── Flow 2 — ADK Agent lifecycle ──────────────────────────────────────────
+POST   /api/reports/                            ✅ Create report request (returns request_id)
+GET    /api/reports/                            ✅ List reports (filter: ?created_by=)
+GET    /api/reports/{id}                        ✅ Get report state + chat history
+POST   /api/reports/{id}/upload                 ✅ Upload file to report
+POST   /api/reports/{id}/confirm-mapping        ✅ Accept/override column mapping
+GET    /api/reports/{id}/dashboard              ✅ Computed KPIs + chart JSON (requires status: computed|review|approved)
+GET    /api/reports/{id}/schema-memory          ✅ Check schema memory for client+template
+
+# ── Review Queue ───────────────────────────────────────────────────────────
+GET    /api/reports/review-queue/list           ✅ List (filter: ?status=pending|approved|rejected)
+GET    /api/reports/review-queue/{id}/new-kpis  ✅ User-defined KPIs pending review
+POST   /api/reports/review-queue/{id}/approve   ✅ Approve + save schema memory + promote KPIs
+POST   /api/reports/review-queue/{id}/reject    ✅ Reject with reviewer notes
 
 # ── KPI Catalog ────────────────────────────────────────────────────────────
-GET    /api/kpis                            ✅ List (filter: ?domain= ?reviewed=)
-POST   /api/kpis                            ✅ Create manually
-GET    /api/kpis/{id}                       ✅ Single KPI detail
-POST   /api/kpis/{id}/review                ✅ Mark reviewed=true/false
+GET    /api/kpis                                ✅ List (filter: ?domain= ?reviewed=)
+POST   /api/kpis                                ✅ Create manually
+GET    /api/kpis/{id}                           ✅ Single KPI detail
+POST   /api/kpis/{id}/review                    ✅ Mark reviewed=true/false
 
-# ── Missing ────────────────────────────────────────────────────────────────
-POST   /api/reports/{id}/chat               ⚠️ Not built as separate endpoint — ADK now runs via /interview (ADK_ENABLED=true)
-GET    /api/reports/{id}/files              ❌ Multi-file list
-POST   /api/reports/{id}/upload/done        ❌ Signal upload complete → trigger discovery
-GET    /api/reports/{id}/pptx               ❌ PPTX download
+# ── Not built / Diverged from PRD3 ────────────────────────────────────────
+POST   /api/reports/{id}/chat                   ⚠️ NOT BUILT — ADK runs via /interview (ADK_ENABLED=true)
+GET    /api/reports/{id}/files                  ❌ Multi-file list (deferred)
+POST   /api/reports/{id}/upload/done            ❌ Multi-file trigger (deferred)
+GET    /health                                  ✅ Health check
 ```
+
+---
+
+## MVP Exit Gate — Current Status
+
+| Gate | Status | Notes |
+|---|---|---|
+| Dev can clone + run in < 1 hour | ⚠️ ~1.5 hrs | Windows pip memory issue; document workaround |
+| Agent completes full loop for 3 reports | ⚠️ ADK wired | Needs real BGO data test with `ADK_ENABLED=true` |
+| Client Health Dashboard template renders | ⚠️ Working | Verify template routing via ADK agent conversation |
+| Review queue: approve / reject / override | ✅ Done | Frontend at `/review-queue` |
+| Schema memory skips mapping on 2nd run | ✅ Done | `run_data_discovery` pre-fill implemented |
+| PPTX export produces valid file | ⚠️ Code done | Place `bgo_slide_master.pptx` → BGO branding active |
+| ADK traces visible in `adk web` | ⚠️ In progress | Set `OPENAI_API_KEY` env var before `adk web --port 8001` |
+| Platform reusability gate (Hunter Point + voice) | ❌ Pending | Paper review |
+| 3 pilot reports with real BGO data | ❌ Pending | Needs pilot session with ops team |
 
 ---
 
@@ -260,18 +295,18 @@ GET    /api/reports/{id}/pptx               ❌ PPTX download
 
 | # | Question | Owner | Status |
 |---|---|---|---|
-| 1 | BGO PowerPoint slide master as `.pptx` file? | Marketing / Data team | **Blocking PPTX export** |
-| 2 | Who is the Phase 1 pilot reviewer on the central data team? | Data team lead | Needed for review queue pilot |
-| 3 | ~~Which ~50 KPIs seed the catalog?~~ | Data team | ✅ 69 KPIs seeded from `KPI's & Definition.xlsx` + Affirm Care |
-| 4 | Anthropic API key — shared team account or individual dev keys? | Platform lead | Needed for ADK agent (Flow 2) |
-| 5 | `client_id` naming convention for schema memory keys | Data team | Needed by pilot |
-| 6 | Executive Scorecard: Workday Excel export interim or API from day one? | Workday admin | Needed by pilot |
-| 7 | Hunter Point data schema — different enough to require platform changes? | Hunter Point lead | Needed by Week 3 |
+| 1 | BGO PowerPoint slide master `.pptx` | Marketing / Data team | **Blocking BGO-branded PPTX** |
+| 2 | Who is the Phase 1 pilot reviewer? | Data team lead | Needed for pilot session |
+| 3 | ~~Which KPIs seed the catalog?~~ | Data team | ✅ 69 KPIs seeded |
+| 4 | Anthropic API key for Claude (optional) | Platform lead | Only needed if `ADK_PROVIDER=anthropic` |
+| 5 | `client_id` naming convention for schema memory | Data team | Needed for schema memory pre-fill accuracy |
+| 6 | Executive Scorecard: Workday Excel or API? | Workday admin | Needed by pilot |
+| 7 | Hunter Point data schema differences? | Hunter Point lead | Pre-MVP paper review |
 | 8 | Confirm formulas for 3 pending KPIs: `interval_compliance`, `tardiness_pct`, `overtime_hours` | Data team | Needed before pilot |
-| 9 | ~~AWS or Railway for production?~~ | Platform lead | ✅ Railway — Volumes for storage, managed PostgreSQL plugin |
+| 9 | ~~AWS or Railway for production?~~ | Platform lead | ✅ Railway |
 | 10 | ~~Self-hosted Langfuse or cloud?~~ | Platform lead | ✅ Langfuse Cloud free tier |
-| 11 | Typical number of Excel files per report? (informs multi-file upload UX) | Ops users | Needed for multi-file design |
-| 12 | ~~Should Flow 1 and Flow 2 merge?~~ | Product lead | ✅ Resolved — merged via `ADK_ENABLED` flag on `/interview` endpoint. Flow 1 is permanent fallback. |
+| 11 | Typical number of Excel files per report? | Ops users | Informs multi-file UX (deferred) |
+| 12 | ~~Should Flow 1 and Flow 2 merge into one UX?~~ | Product lead | ✅ Resolved — merged via `ADK_ENABLED` flag |
 
 ---
 
@@ -279,12 +314,9 @@ GET    /api/reports/{id}/pptx               ❌ PPTX download
 
 Same code. Infrastructure swap only. Do in order; test after each step.
 
-1. **SQLite → PostgreSQL:** Add Railway PostgreSQL plugin. Set `DATABASE_URL`. Raw SQL is PostgreSQL-compatible (`ON CONFLICT` syntax identical). No code changes.
-2. **Local storage → Railway Volume:** Add Railway Volume. Set `UPLOAD_DIR` to volume mount path (e.g. `/data/uploads`). No code changes.
-3. **ADK local → Railway service:** Add second Railway service with start command `adk api_server`. Set `ADK_API_URL` env var on FastAPI service. Agent code unchanged.
-4. **Langfuse:** Set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`. Replace `agent_log` writes with Langfuse trace calls — one import swap.
+1. **SQLite → PostgreSQL:** Set `DATABASE_URL` to Railway PostgreSQL connection string. No code changes.
+2. **Local storage → Railway Volume:** Set `UPLOAD_DIR` env var to volume mount path. No code changes.
+3. **ADK → Railway service:** Add Railway service with `adk api_server` start command. Set `ADK_API_URL`.
+4. **Langfuse:** Set 3 env vars. Replace `agent_log` writes with Langfuse trace calls.
 5. **SSO:** Add FastAPI middleware + BGO SSO provider config.
-6. **pgvector (optional):** Enable pgvector on Railway PostgreSQL. Replace `difflib.SequenceMatcher` with semantic column matching. No user-facing change.
-
-**dbt Core (when second data source is live):**
-When Workday or telephony data joins Excel uploads, load raw files into PostgreSQL staging tables and introduce dbt models for the silver/gold transformation layer. The `report_files` table already provides the source reference each dbt source will need. Schema design is dbt-ready from day one — no rework required at that point.
+6. **pgvector (optional):** Replace `difflib.SequenceMatcher` with semantic column matching.
