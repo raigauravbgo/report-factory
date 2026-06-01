@@ -60,16 +60,16 @@ source venv/bin/activate
 
 ```powershell
 # Batch 1 — core
-pip install fastapi==0.124.1 uvicorn[standard]==0.34.0 pydantic==2.13.4 pydantic-settings==2.5.2 python-multipart==0.0.12 httpx==0.28.1
+pip install fastapi==0.136.1 "uvicorn[standard]==0.47.0" pydantic==2.13.4 pydantic-settings==2.14.1 python-multipart==0.0.29 httpx==0.28.1
 
 # Batch 2 — data + export
-pip install pandas==3.0.3 openpyxl==3.1.5 python-pptx sqlalchemy==2.0.35 alembic==1.13.3
+pip install pandas==2.3.0 openpyxl==3.1.5 python-pptx==1.0.2 sqlalchemy==2.0.49 alembic==1.18.4
 
 # Batch 3 — AI
-pip install openai==2.38.0 anthropic litellm
+pip install openai==2.37.0 anthropic==0.105.2 litellm==1.85.0
 
 # Batch 4 — agent + storage
-pip install google-adk boto3==1.35.28 cryptography==43.0.1 python-jose asteval
+pip install google-adk==2.1.0 boto3==1.38.0 cryptography==48.0.0 "python-jose[cryptography]==3.5.0" asteval==1.0.8
 ```
 
 > **Mac/Linux users:** A single command works:
