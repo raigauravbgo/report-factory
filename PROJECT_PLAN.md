@@ -161,6 +161,7 @@ report-factory/
 | Executive insights | Finding→Narrative→Decision framework, 4 severity levels |
 | Excel export | 3 sheets: KPI Summary, Time Series, Breakdown |
 | PPTX export (code) | Title + KPI tiles + chart slides + flags slide; BGO branding ready |
+| Dashboard filter wiring | `GET /filter-values` loads real options; filters applied server-side; empty state + inline error |
 
 ---
 
@@ -193,7 +194,7 @@ report-factory/
 | Profile | `/profile/[uploadId]` | Column type/role review, override dropdowns |
 | Interview | `/interview` | 5-step chat, ADK primary / OpenAI fallback |
 | Recipe | `/recipe/[recipeId]` | Edit KPIs + column names, approve/re-approve |
-| Dashboard | `/dashboard/[recipeId]` | KPI cards, line/bar charts, insights, Excel+PPTX export |
+| Dashboard | `/dashboard/[recipeId]` | KPI cards, line/bar charts, insights, Excel+PPTX export, live dimension filters |
 | Review Queue | `/review-queue` | List+detail, approve/reject, KPI table, flags |
 | Report Detail | `/reports/[reportId]` | ADK mapping table, confidence, overrides, confirm button |
 
@@ -213,7 +214,7 @@ report-factory/
 |---|---|
 | `adk web` trace verification | `cd backend && $env:OPENAI_API_KEY=... && adk web --port 8001` → select `agent` → test conversation |
 | 3 pilot reports with real BGO data | Schedule session with ops team + data team reviewer; use `/review-queue` to approve |
-| Setup time < 1 hour | Currently ~1.5 hrs on Windows — document pip workaround in README |
+| ~~Setup time < 1 hour~~ | ✅ README.md written — Windows batch install workaround, step-by-step guide, 6 troubleshooting scenarios |
 
 ---
 
@@ -244,6 +245,7 @@ POST   /interview/recipe/{id}/approve           ✅ Approve / re-approve recipe
 GET    /api/dashboard/{id}/data                 ✅ Compute KPIs + charts + insights (generated_at)
 GET    /api/dashboard/{id}/export/excel         ✅ Download Excel (3 sheets)
 GET    /api/dashboard/{id}/export/pptx          ✅ Download PPTX (code built; BGO branding pending slide master)
+GET    /api/dashboard/{id}/filter-values        ✅ Distinct values per dimension/filter column (populates FilterBar)
 
 # ── Flow 2 — ADK Agent lifecycle ──────────────────────────────────────────
 POST   /api/reports/                            ✅ Create report request (returns request_id)
@@ -279,7 +281,7 @@ GET    /health                                  ✅ Health check
 
 | Gate | Status | Notes |
 |---|---|---|
-| Dev can clone + run in < 1 hour | ⚠️ ~1.5 hrs | Windows pip memory issue; document workaround |
+| Dev can clone + run in < 1 hour | ✅ Done | README.md covers Windows batch install, step-by-step setup, troubleshooting |
 | Agent completes full loop for 3 reports | ⚠️ ADK wired | Needs real BGO data test with `ADK_ENABLED=true` |
 | Client Health Dashboard template renders | ⚠️ Working | Verify template routing via ADK agent conversation |
 | Review queue: approve / reject / override | ✅ Done | Frontend at `/review-queue` |
