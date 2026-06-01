@@ -60,6 +60,7 @@ report-factory/
 ├── backend/
 │   ├── main.py                              ✅ FastAPI app — routers, CORS, init_db(), seed on startup
 │   ├── agent/
+│   │   ├── __init__.py                      ✅ Exports root_agent (required by adk web discovery)
 │   │   └── report_factory_agent/
 │   │       ├── agent.py                     ✅ Root ADK agent — LiteLlm(openai) or Anthropic via _resolve_model()
 │   │       └── tools/
@@ -212,7 +213,7 @@ report-factory/
 
 | Item | Action |
 |---|---|
-| `adk web` trace verification | `cd backend && $env:OPENAI_API_KEY=... && adk web --port 8001` → select `agent` → test conversation |
+| ~~`adk web` trace verification~~ | ✅ Fixed — `agent/__init__.py` now exports `root_agent`; `OPENAI_API_KEY` auto-resolved from `.env`. Run `cd backend && adk web --port 8001` — no manual key needed |
 | 3 pilot reports with real BGO data | Schedule session with ops team + data team reviewer; use `/review-queue` to approve |
 | ~~Setup time < 1 hour~~ | ✅ README.md written — Windows batch install workaround, step-by-step guide, 6 troubleshooting scenarios |
 
@@ -287,7 +288,7 @@ GET    /health                                  ✅ Health check
 | Review queue: approve / reject / override | ✅ Done | Frontend at `/review-queue` |
 | Schema memory skips mapping on 2nd run | ✅ Done | `run_data_discovery` pre-fill implemented |
 | PPTX export produces valid file | ⚠️ Code done | Place `bgo_slide_master.pptx` → BGO branding active |
-| ADK traces visible in `adk web` | ⚠️ In progress | Set `OPENAI_API_KEY` env var before `adk web --port 8001` |
+| ADK traces visible in `adk web` | ✅ Done | Fixed `agent/__init__.py` + OPENAI_API_KEY auto-resolution from `.env` |
 | Platform reusability gate (Hunter Point + voice) | ❌ Pending | Paper review |
 | 3 pilot reports with real BGO data | ❌ Pending | Needs pilot session with ops team |
 
