@@ -64,7 +64,36 @@ def run_interview(
         try:
             from services.adk_runner import run_turn
             session_id = f"upload_{body.upload_id}"
-            ai_message = run_turn(session_id, body.message)
+
+            # On first turn (empty message), inject the column profile so the
+            # ADK agent knows which columns exist and can call the right tool.
+            if not body.message:
+                date_cols = [c.name for c in profile.columns if c.suggested_role == "date"]
+                dim_cols  = [c.name for c in profile.columns if c.suggested_role == "dimension"]
+                msr_cols  = [c.name for c in profile.columns if c.suggested_role == "measure"]
+                all_cols  = ", ".join(
+                    f"{c.name} ({c.detected_type})"
+                    for c in profile.columns
+                )
+                adk_message = (
+                    f"[FILE UPLOADED]\n"
+                    f"upload_id: {body.upload_id}\n"
+                    f"rows: {profile.row_count:,}\n"
+                    f"columns ({len(profile.columns)} total): {all_cols}\n"
+                    f"likely date columns: {', '.join(date_cols) or 'none detected'}\n"
+                    f"likely dimensions: {', '.join(dim_cols[:5]) or 'none detected'}\n"
+                    f"likely measures: {', '.join(msr_cols[:5]) or 'none detected'}\n\n"
+                    "The file is already uploaded and profiled. "
+                    "Greet the user, summarise what you can see in the data, "
+                    "and start the intake interview. "
+                    "When Step 2 (data discovery) is reached, call "
+                    f"run_data_discovery_from_upload(upload_id={body.upload_id}) — "
+                    "do NOT ask the user to upload again."
+                )
+            else:
+                adk_message = body.message
+
+            ai_message = run_turn(session_id, adk_message)
 
             # Reuse Flow 1 extraction logic to parse step/completion from response
             updated = list(history)

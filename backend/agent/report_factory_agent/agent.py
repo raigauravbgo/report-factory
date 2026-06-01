@@ -9,6 +9,7 @@ from core.config import settings
 from .tools.define_kpi import run_define_new_kpi
 from .tools.intake import run_intake
 from .tools.data_discovery import run_data_discovery
+from .tools.data_discovery_from_upload import run_data_discovery_from_upload
 from .tools.standardise import run_standardise
 from .tools.generate import run_generate
 
@@ -48,6 +49,15 @@ Ask the user for:
 - Reporting period (start and end date)
 - KPI list
 
+When the session starts with a [FILE UPLOADED] context block, you already know the
+column names and types — use them to make intelligent suggestions:
+- Suggest the most likely date column based on detected types and column names
+- Suggest KPIs from the catalog that match the detected columns (e.g. if you see
+  "avg_csat_rating" suggest average_csat_score; if you see "live_contacts / total_dials"
+  suggest contact_rate)
+- Suggest likely dimensions (categorical columns like agent, vendor, location, team)
+- Tell the user what you found and let them confirm or adjust
+
 When discussing KPIs, suggest catalog KPIs relevant to the chosen template.
 The user may request KPIs that are not in the catalog — handle them as follows:
 
@@ -59,33 +69,47 @@ The user may request KPIs that are not in the catalog — handle them as follows
   4. "What's the expected range? (e.g. 0–100%, any positive number, etc.)"
   5. "Which domain does this belong to: collections, cx, sales, workforce, or ops?"
   Once you have the answers, call run_define_new_kpi.
-  Tell the user: "I've added [KPI Name] to the catalog as a draft. The central data team
-  will review and formalise it when your report reaches the review queue."
 
-After all KPIs are either confirmed from catalog or newly defined, call run_intake.
+After all KPIs are confirmed, call run_intake.
 
-STEP 2 — DATA DISCOVERY
-After intake is confirmed, ask the user to upload their Excel file.
-Once the file_path is available, call run_data_discovery to parse headers and produce a column mapping draft.
-Present the mapping to the user. For each item show: column name → KPI → confidence score.
-Items with confidence < 0.7 are flagged — ask the user to confirm or correct them explicitly.
-Do NOT proceed to Step 3 until the user confirms the full mapping.
+STEP 2 — DATA DISCOVERY (SUGGESTIONS FIRST)
+After intake is confirmed:
+
+  IF an upload_id was provided in the session context:
+    Call run_data_discovery_from_upload(upload_id) — this uses the already-uploaded
+    and profiled file. Do NOT ask the user to upload again.
+
+  IF no upload_id is available (pure ADK session):
+    Ask the user to provide the file_path, then call run_data_discovery.
+
+After calling either discovery tool:
+- Present the suggested mappings to the user in a clear table:
+    Column → Matched KPI → Confidence
+- Group them: ✅ High confidence (≥70%) and ⚠️ Needs review (<70%)
+- For ⚠️ items: ask the user to confirm or provide the correct column name
+- NEVER skip this confirmation step — mappings affect all computed values
 
 STEP 3 — STANDARDISE
-Call run_standardise with the confirmed mapping to compute KPI values and run validation.
-Surface any data quality flags to the user. These are non-blocking — the user can proceed despite flags.
+Call run_standardise with the confirmed mapping to compute KPI values.
+Surface any data quality flags. These are non-blocking.
 
 STEP 4 — GENERATE
-Call run_generate to build chart-ready JSON and generate the PPTX file.
-Inform the user that the report has been submitted to the review queue.
-If the report includes user-defined KPIs, mention that the reviewer will also formalise those definitions.
+Call run_generate to build chart-ready JSON.
+Tell the user the report is in the review queue.
 
 Rules:
 - Always complete steps in order.
 - Never skip user confirmation on column mapping (Step 2).
+- Always SUGGEST based on what you can see — never silently assume.
 - If the user asks to change a KPI or mapping mid-flow, re-run the relevant step.
 - Keep responses concise. Use bullet points for lists.
-- When a user defines a new KPI, always confirm the definition back to them before calling run_define_new_kpi.
 """,
-    tools=[run_define_new_kpi, run_intake, run_data_discovery, run_standardise, run_generate],
+    tools=[
+        run_define_new_kpi,
+        run_intake,
+        run_data_discovery,
+        run_data_discovery_from_upload,
+        run_standardise,
+        run_generate,
+    ],
 )
