@@ -7,6 +7,26 @@
   "optional_kpis": ["csat_score", "qa_score", "net_collected"],
   "required_dimensions": ["date"],
   "optional_dimensions": ["site", "agent_id"],
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Workforce Summary",
+      "kpis": ["login_hours", "productive_hours", "paid_hours", "occupancy_rate"],
+      "chart_type": "kpi_card"
+    },
+    {
+      "id": "utilisation",
+      "title": "Utilisation Trends",
+      "kpis": ["occupancy_rate", "productive_hours"],
+      "chart_type": "line"
+    },
+    {
+      "id": "breakdown",
+      "title": "Hours Breakdown",
+      "kpis": ["login_hours", "productive_hours", "pause_hours"],
+      "chart_type": "bar"
+    }
+  ],
   "charts": [
     {
       "chart_id": "workforce_kpi_tiles",

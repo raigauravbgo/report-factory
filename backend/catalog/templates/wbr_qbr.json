@@ -7,6 +7,26 @@
   "optional_kpis": ["csat_score", "occupancy_rate", "total_collected", "abandon_rate", "connect_rate"],
   "required_dimensions": ["date"],
   "optional_dimensions": ["agent_id", "site", "campaign"],
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Business Review Summary",
+      "kpis": ["contact_rate", "ptp_rate", "ptp_kept_rate", "net_collected"],
+      "chart_type": "kpi_card"
+    },
+    {
+      "id": "trends",
+      "title": "Period Trends",
+      "kpis": ["contact_rate", "ptp_rate", "penetration_rate"],
+      "chart_type": "line"
+    },
+    {
+      "id": "collections",
+      "title": "Collections Performance",
+      "kpis": ["net_collected"],
+      "chart_type": "bar"
+    }
+  ],
   "charts": [
     {
       "chart_id": "scorecard_tiles",

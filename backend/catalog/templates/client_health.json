@@ -7,6 +7,26 @@
   "optional_kpis": ["net_collected", "penetration_rate", "connect_rate", "abandon_rate", "total_collected"],
   "required_dimensions": ["date", "agent_id"],
   "optional_dimensions": ["campaign", "site"],
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Performance Overview",
+      "kpis": ["contact_rate", "ptp_rate", "ptp_kept_rate"],
+      "chart_type": "kpi_card"
+    },
+    {
+      "id": "trends",
+      "title": "Weekly Trends",
+      "kpis": ["contact_rate", "ptp_rate"],
+      "chart_type": "line"
+    },
+    {
+      "id": "breakdown",
+      "title": "Agent Breakdown",
+      "kpis": ["contact_rate", "ptp_rate"],
+      "chart_type": "bar"
+    }
+  ],
   "charts": [
     {
       "chart_id": "contact_rate_trend",

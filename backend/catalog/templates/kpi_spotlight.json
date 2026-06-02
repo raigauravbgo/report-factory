@@ -7,6 +7,26 @@
   "optional_kpis": ["__any__"],
   "required_dimensions": ["date"],
   "optional_dimensions": ["agent_id", "site", "campaign"],
+  "sections": [
+    {
+      "id": "overview",
+      "title": "KPI Summary",
+      "kpis": ["__selected__"],
+      "chart_type": "kpi_card"
+    },
+    {
+      "id": "trend",
+      "title": "Trend Over Time",
+      "kpis": ["__selected__"],
+      "chart_type": "line"
+    },
+    {
+      "id": "breakdown",
+      "title": "Breakdown by Dimension",
+      "kpis": ["__selected__"],
+      "chart_type": "bar"
+    }
+  ],
   "charts": [
     {
       "chart_id": "kpi_trend",
