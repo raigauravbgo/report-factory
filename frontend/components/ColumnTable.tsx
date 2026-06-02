@@ -1,14 +1,22 @@
 "use client";
 
-import type { ColumnProfile, ColumnRole } from "@/lib/types";
+import type { ColumnProfile, ColumnRole, SemanticTag } from "@/lib/types";
+
+interface ColumnOverrideState {
+  role?: ColumnRole;
+  semanticTag?: SemanticTag;
+  inGrain?: boolean;
+}
 
 interface Props {
   columns: ColumnProfile[];
-  overrides: Record<string, ColumnRole>;
-  onOverride: (colName: string, role: ColumnRole) => void;
+  overrides: Record<string, ColumnOverrideState>;
+  onOverride: (colName: string, patch: Partial<ColumnOverrideState>) => void;
+  grainSuggestions?: string[];
 }
 
 const ROLE_OPTIONS: ColumnRole[] = ["date", "dimension", "measure", "ignore"];
+const TAG_OPTIONS: SemanticTag[] = ["entity_key", "time_key", "financial_metric", "dimension", "text", "ignore"];
 
 const TYPE_BADGE: Record<string, string> = {
   date: "bg-purple-100 text-purple-700",
@@ -24,7 +32,16 @@ const ROLE_BADGE: Record<ColumnRole, string> = {
   ignore: "bg-gray-50 text-gray-400",
 };
 
-export default function ColumnTable({ columns, overrides, onOverride }: Props) {
+const TAG_BADGE: Record<SemanticTag, string> = {
+  entity_key: "bg-indigo-50 text-indigo-600",
+  time_key: "bg-purple-50 text-purple-600",
+  financial_metric: "bg-emerald-50 text-emerald-700",
+  dimension: "bg-blue-50 text-blue-600",
+  text: "bg-gray-50 text-gray-500",
+  ignore: "bg-gray-50 text-gray-400",
+};
+
+export default function ColumnTable({ columns, overrides, onOverride, grainSuggestions = [] }: Props) {
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200">
       <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -33,6 +50,8 @@ export default function ColumnTable({ columns, overrides, onOverride }: Props) {
             <th className="px-4 py-3 text-left">Column</th>
             <th className="px-4 py-3 text-left">Detected type</th>
             <th className="px-4 py-3 text-left">Role</th>
+            <th className="px-4 py-3 text-left">Semantic tag</th>
+            <th className="px-4 py-3 text-center">Grain</th>
             <th className="px-4 py-3 text-right">Missing</th>
             <th className="px-4 py-3 text-right">Unique</th>
             <th className="px-4 py-3 text-left">Sample values</th>
@@ -40,13 +59,22 @@ export default function ColumnTable({ columns, overrides, onOverride }: Props) {
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
           {columns.map((col) => {
-            const role = overrides[col.name] ?? col.suggested_role;
-            const isOverridden = overrides[col.name] !== undefined && overrides[col.name] !== col.suggested_role;
+            const ov = overrides[col.name] ?? {};
+            const role = ov.role ?? col.suggested_role;
+            const tag = ov.semanticTag ?? col.semantic_tag ?? "dimension";
+            const grainScore = col.grain_score ?? 0;
+            const isAiGrain = grainSuggestions.includes(col.name);
+            const inGrain = ov.inGrain !== undefined ? ov.inGrain : (col.grain_candidate || isAiGrain);
+            const isDirty =
+              (ov.role !== undefined && ov.role !== col.suggested_role) ||
+              (ov.semanticTag !== undefined && ov.semanticTag !== col.semantic_tag) ||
+              (ov.inGrain !== undefined && ov.inGrain !== (col.grain_candidate || isAiGrain));
+
             return (
               <tr key={col.name} className={role === "ignore" ? "opacity-40" : ""}>
-                <td className="px-4 py-3 font-mono font-medium text-gray-900">
+                <td className="px-4 py-3 font-mono font-medium text-gray-900 whitespace-nowrap">
                   {col.name}
-                  {isOverridden && <span className="ml-1 text-xs text-amber-500">*</span>}
+                  {isDirty && <span className="ml-1 text-xs text-amber-500">*</span>}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`rounded px-2 py-0.5 text-xs font-medium ${TYPE_BADGE[col.detected_type]}`}>
@@ -56,13 +84,45 @@ export default function ColumnTable({ columns, overrides, onOverride }: Props) {
                 <td className="px-4 py-3">
                   <select
                     value={role}
-                    onChange={(e) => onOverride(col.name, e.target.value as ColumnRole)}
+                    onChange={(e) => onOverride(col.name, { role: e.target.value as ColumnRole })}
                     className={`rounded border border-gray-200 px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 ${ROLE_BADGE[role]}`}
                   >
                     {ROLE_OPTIONS.map((r) => (
                       <option key={r} value={r}>{r}</option>
                     ))}
                   </select>
+                </td>
+                <td className="px-4 py-3">
+                  <select
+                    value={tag}
+                    onChange={(e) => onOverride(col.name, { semanticTag: e.target.value as SemanticTag })}
+                    className={`rounded border border-gray-200 px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 ${TAG_BADGE[tag]}`}
+                  >
+                    {TAG_OPTIONS.map((t) => (
+                      <option key={t} value={t}>{t.replace("_", " ")}</option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="w-16 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-teal-500"
+                        style={{ width: `${Math.round(grainScore * 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={inGrain}
+                        onChange={(e) => onOverride(col.name, { inGrain: e.target.checked })}
+                        className="h-3 w-3 rounded accent-teal-600"
+                      />
+                      {isAiGrain && !ov.inGrain && (
+                        <span className="text-[9px] text-teal-600 font-medium">AI</span>
+                      )}
+                    </div>
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-right text-gray-500">
                   {col.missing_pct > 0 ? (
