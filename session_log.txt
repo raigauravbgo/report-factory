@@ -1,0 +1,444 @@
+================================================================================
+BGO REPORT FACTORY — SESSION LOG
+Date: 2026-06-02
+Branch: sourav_stagging
+Participants: Nida Bijapure (nida.bijapure@billgosling.com)
+================================================================================
+
+--------------------------------------------------------------------------------
+SECTION 1: SESSION OVERVIEW
+--------------------------------------------------------------------------------
+
+This session covered the full planning and implementation of the multi-file data
+pipeline for BGO Report Factory. Starting from a working single-file upload flow,
+the session expanded the system into an 8-step pipeline with deep profiling,
+schema relationship detection, hybrid AI interview (Flow 1), checkable KPI
+selection, data validation, and story-driven dashboard generation.
+
+Reference documents used:
+  - claude_plan.md      — approved implementation plan
+  - PRD3.md             — product requirements (single source of truth)
+  - PROJECT_PLAN.md     — historical project state
+
+--------------------------------------------------------------------------------
+SECTION 2: USER PROMPT / REQUIREMENTS
+--------------------------------------------------------------------------------
+
+Framework & Deployment
+  - Build on ADK framework (Python only — no GCP/AWS dependency)
+  - Deploy on Railway
+
+End-to-End Workflow (8 steps)
+  1. Multi-file upload — batch CSV + Excel simultaneously
+     Capture: filename, type, size, row count, column names, sample rows,
+     null counts, duplicate counts
+  2. Deep file profiling — detect encoding (chardet), delimiter (csv.Sniffer),
+     sheet names for Excel, data type per column
+  3. Schema mapping per file — AI auto-classifies Dimension/Measure/Date/Key
+     User can edit. AI suggests grain-level columns (multi-select)
+  4. Schema relationship detection across files — column name match,
+     fuzzy matching, cardinality match, value set overlap
+  5. AI interview (side panel chatbot) — Q1 hard-coded (domain identification),
+     Q2+ dynamic based on uploaded column profiles
+  6. KPI suggestion — scrollable checkable LIST (not card grid)
+     User checks/unchecks. Allow custom KPI addition
+  7. AI data validation — zero-value fields, missing data, division risks
+  8. Dashboard generation — story-driven sections, not a random KPI dump
+
+KPI Registry & Templates
+  - JSON-based KPI registry
+  - Templates pre-built: client health, collections, CX, executive dashboard
+  - Each template defines: ID, name, required KPIs, optional KPIs,
+    chart types, section layout
+
+Frontend requirements
+  - Batch file upload replaces single file upload
+  - Each file gets its own tab (column table, data type, semantic role, grain)
+  - Progress sidebar showing per-file completion
+  - "Continue to KPI Selection" enabled only when all files are done
+  - KPI selection: scrollable checkable list with slicer/filter style (NOT card grid)
+  - Double-click to add comment; Select All / Deselect All
+  - Dashboard: KPIs grouped into story sections
+
+Backend requirements
+  - POST endpoint accepting multiple files at once
+  - CSV: CSV sniffer for encoding + delimiter (never assume comma-separated)
+  - Excel: detect sheet names, handle multiple worksheets
+  - Upload limits: Excel 200,000 rows, CSV 200,000 rows, 50MB per file
+  - SQLite for now, PostgreSQL-ready
+  - Dynamic table schema — do not create one table per upload
+  - Plan for data appending and crash recovery
+
+LLM Model Support
+  - GPT-4o-mini (OpenAI) — default
+  - claude-sonnet-4-20250514 (Anthropic) — alternate
+  - Switch via LLM_PROVIDER in .env — no code change required
+
+AI Interview Flows
+  - Flow 1 (build first): Q1 hard-coded generic question, Q2+ dynamic
+  - Flow 2 (deferred): fully dynamic — DO NOT start until Flow 1 is tested
+
+--------------------------------------------------------------------------------
+SECTION 3: PLAN DECISIONS & CLARIFICATIONS
+--------------------------------------------------------------------------------
+
+Q: What about the interview question structure?
+A: Q1 is always hard-coded ("What type of data does this represent?").
+   Q2 onwards are AI-generated dynamically based on the uploaded column
+   profiles (detected dates, measures, dimensions). This is still Flow 1.
+
+Q: What is the Excel row limit?
+A: 200,000 max (same as CSV).
+
+Q: Is schema mapping mandatory before interview?
+A: No. Schema mapping page has two CTAs:
+   "Continue to Interview" and "Skip Interview → Go to KPI Selection".
+   Interview is optional at all steps.
+
+Final approved plan saved to: claude_plan.md
+
+--------------------------------------------------------------------------------
+SECTION 4: IMPLEMENTATION — FILES CREATED / MODIFIED
+--------------------------------------------------------------------------------
+
+COMMIT 1: docs — CLAUDE.md, project plan, PRD cleanup
+  Modified:  CLAUDE.md             — full rewrite for current stack + 8-step pipeline
+  Modified:  README.md             — updated install commands to exact versions
+  Modified:  .gitignore            — added new-env/ to ignore list
+  Created:   project_plan1.md     — task tracker with checkboxes per phase
+  Created:   claude_plan.md       — approved implementation plan
+  Deleted:   PRD.md               — superseded by PRD3.md
+  Deleted:   PRD2.md              — superseded by PRD3.md
+
+COMMIT 2: feat(config) — LLM provider switch
+  Modified:  backend/core/config.py
+    - Added: llm_provider (default "openai")
+    - Added: anthropic_model ("claude-sonnet-4-20250514")
+    - Added: max_excel_rows, max_csv_rows, max_upload_files, max_columns_per_file
+
+  Modified:  backend/services/ai_client.py
+    - Refactored chat_complete() to route via LLM_PROVIDER env var
+    - Added: _openai_complete(), _azure_openai_complete(), _anthropic_complete()
+    - Anthropic: separates system prompt, injects JSON mode instruction into system text
+
+  Modified:  backend/.env.example
+    - Added: LLM_PROVIDER, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+    - Added: MAX_EXCEL_ROWS, MAX_CSV_ROWS, MAX_UPLOAD_FILES, MAX_COLUMNS_PER_FILE
+    - Restructured into labelled sections
+
+COMMIT 3: feat(upload) — batch upload + deep profiling
+  Modified:  backend/api/routes/upload.py
+    - Added: POST /upload/batch (accepts List[UploadFile], creates one Dataset)
+    - Added: POST /upload/{id}/schema (saves user column/role/grain overrides)
+    - Extracted _validate_and_read() and _create_upload() helpers
+    - _parse_and_profile() now uses ParseResult (not bare DataFrame)
+    - UploadResponse now includes error_message (was invisible before)
+
+  Modified:  backend/services/parser.py
+    - CSV: chardet.detect() for encoding, csv.Sniffer for delimiter
+    - Excel: pd.ExcelFile to capture sheet_names, active_sheet param support
+    - _enforce_limits(): rejects files over row/column limits with clear message
+    - Returns ParseResult dataclass instead of bare DataFrame
+
+  Modified:  backend/services/profiler.py
+    - Added: semantic_tag per column (pattern-matched from column name)
+      Values: entity_key / time_key / financial_metric / dimension / text / ignore
+    - Added: grain_score = unique_count / row_count (per column)
+    - Added: grain_candidate = True when grain_score >= 0.95
+    - Added: _infer_grain_suggestions() — heuristic entity_key + time_key combos
+
+  Modified:  backend/schemas/upload.py
+    - Extend ColumnProfile: semantic_tag, grain_score, grain_candidate
+    - Extend ProfilingResult: encoding, delimiter, sheet_names, active_sheet, grain_suggestions
+    - Added: BatchUploadResponse, BatchUploadItem
+    - Added: ColumnSchemaOverride, SaveSchemaOverridesRequest
+
+  Modified:  backend/models/staging_table.py
+    - Added columns: encoding, delimiter, sheet_names (JSON), active_sheet, grain_columns (JSON)
+
+  Created:   backend/migrations/versions/0002_staging_table_deep_profiling.py
+    - Alembic migration: ALTER staging_tables to add 5 new columns
+
+  Modified:  backend/requirements.txt
+    - Added: chardet==5.2.0
+    - Pinned: boto3==1.38.0 (was >=1.35.0)
+    - Reformatted with section headers
+
+COMMIT 4: feat(session) — multi-file session pipeline services and routes
+  Created:   backend/api/routes/session.py
+    - POST /session/{id}/relationships
+    - POST /session/{id}/interview
+    - GET  /session/{id}/interview/state
+    - POST /session/{id}/interview/skip
+    - POST /session/{id}/kpi-suggestions
+    - POST /session/{id}/validate
+    - POST /session/{id}/generate
+
+  Created:   backend/services/schema_relationships.py
+    - Three-signal detection: fuzzy name match (SequenceMatcher > 0.85),
+      semantic tag match, cardinality signal
+    - Returns up to 20 RelationshipSuggestion sorted by confidence
+    - Relationship types: pk_fk / same_dimension / shared_key
+
+  Created:   backend/services/kpi_suggester.py
+    - Fuzzy-matches columns vs catalog source_fields + aliases
+    - Interview context boost (+0.15) when answer mentions KPI name
+    - Domain filter from Q1 answer
+    - Extracts custom KPIs from interview kpis array
+
+  Created:   backend/services/data_validator.py
+    - Zero-value denominator risk: error if denom column >80% missing
+    - High null warning: measure columns >20% missing
+    - Duplicate grain key: error if >5% duplication on grain columns
+    - Date gap advisory: one advisory per file
+
+  Created:   backend/services/session_generator.py
+    - Resolves selected KPI IDs against catalog
+    - AI groups KPIs into story sections via chat_complete()
+      Sections: Overview / Trends / Breakdown / Data Quality
+    - Falls back to one flat overview section on AI error
+    - Persists ReportRecipe with sections + confirmed_relationships
+
+  Modified:  backend/services/ai_interview.py
+    - Added: FLOW1_Q1 constant (hard-coded domain question)
+    - Added: run_flow1() — Turn 1 returns Q1, Turn 2+ AI-generated contextual questions
+    - Added: default_interview_result() — heuristic defaults for skip path
+
+  Modified:  backend/main.py
+    - Registered session_router
+    - Added _run_migrations() — runs alembic upgrade head on startup
+
+  Created:   backend/.python-version — pins 3.12.10 for pyenv
+
+COMMIT 5: feat(templates) — story-driven sections in all 4 KPI templates
+  Modified:  backend/catalog/templates/client_health.json
+    Sections: Performance Overview (kpi_card), Weekly Trends (line), Agent Breakdown (bar)
+
+  Modified:  backend/catalog/templates/wbr_qbr.json
+    Sections: Business Review Summary (kpi_card), Period Trends (line), Collections (bar)
+
+  Modified:  backend/catalog/templates/exec_scorecard.json
+    Sections: Workforce Summary (kpi_card), Utilisation Trends (line), Hours Breakdown (bar)
+
+  Modified:  backend/catalog/templates/kpi_spotlight.json
+    Sections: KPI Summary (kpi_card), Trend Over Time (line), Breakdown by Dimension (bar)
+
+COMMIT 6: feat(frontend/upload) — multi-file upload UI
+  Modified:  frontend/components/UploadZone.tsx
+    - maxFiles: 1 → 10 (configurable via prop)
+    - Prop: onFile(file) → onFiles(files[])
+    - Accepts .xls in addition to .xlsx and .csv
+
+  Modified:  frontend/app/upload/page.tsx
+    - Replaced single-file flow with POST /upload/batch
+    - Per-file status state with independent polling (every 2s per upload_id)
+    - Per-file progress badge: Queued / Analysing columns / Ready / Failed
+    - error_message from backend now surfaced in UI (was previously invisible)
+    - "Continue to Schema Mapping" enabled only when all files reach profiled
+    - Persists upload list to sessionStorage on navigate
+    - "Upload different files" reset button
+    - Step indicator: Upload → Schema → Interview → KPIs → Dashboard
+
+COMMIT 7: feat(frontend/session) — schema mapping, interview, KPI selection pages
+  Modified:  frontend/lib/types.ts
+    - Added: BatchUploadResponse, BatchUploadItem, DatasetResponse
+    - Extended: ColumnProfile with semantic_tag, grain_score, grain_candidate
+    - Extended: ProfilingResult with encoding, delimiter, sheet_names, active_sheet, grain_suggestions
+    - Added: ColumnSchemaOverride, SaveSchemaOverridesRequest
+    - Added: RelationshipSuggestion, KpiSuggestion, ValidationWarning, ValidationResult
+    - Added: DashboardSection (for story-driven RecipeConfig)
+    - Added: error_message to UploadResponse
+
+  Modified:  frontend/lib/api.ts
+    - Added: uploadBatch(), saveSchemaOverrides()
+    - Added session endpoints: getRelationships(), sendInterviewMessage(),
+      skipInterview(), getKpiSuggestions(), validateData(), generateDashboard()
+    - Legacy single-file interview renamed to sendInterviewMessageLegacy()
+
+  Modified:  frontend/components/ColumnTable.tsx
+    - Added: Semantic Tag column (editable dropdown)
+    - Added: Grain column (score bar 0-100% + checkbox)
+    - Changed override prop to ColumnOverrideState (role + semanticTag + inGrain)
+    - AI-suggested badge for pre-checked grain columns
+    - Amber asterisk dirty-state indicator
+
+  Created:   frontend/components/SchemaRelationships.tsx
+    - Relationship cards: file_a.col_a → file_b.col_b with confidence % and type badge
+    - Checkbox per relationship (all pre-checked by default)
+    - Confirm button passes confirmed subset to parent
+
+  Created:   frontend/app/session/[datasetId]/schema/page.tsx
+    - Loads upload profiles from sessionStorage
+    - Tab per uploaded file
+    - File metadata bar (encoding, delimiter, sheet dropdown, row/null/dupe counts)
+    - AI grain suggestion banner
+    - Amber asterisk dirty-state indicator
+    - CTA: "Continue to Interview" + "Skip Interview → KPI Selection"
+
+  Created:   frontend/app/session/[datasetId]/interview/page.tsx
+    - Side-panel chatbot
+    - First turn fires on mount (receives hard-coded Q1)
+    - Q2+ are AI-generated from column profiles
+    - Progress bar (Q1-Q6)
+    - Skip button always visible
+    - Side panel shows filenames and collected answers
+    - Stores InterviewResult in sessionStorage on completion
+
+  Created:   frontend/app/session/[datasetId]/kpis/page.tsx
+    - Two-panel slicer layout (left = available, right = selected)
+    - Domain filter chips + search input
+    - Select All / Deselect All
+    - Double-click → inline comment field
+    - Right panel: drag-to-reorder (HTML5 drag API), × to remove
+    - "Add custom KPI" inline form at bottom
+    - NOT a card grid — plain list rows
+    - "Generate Dashboard" → POST /session/{id}/generate → navigate to dashboard
+
+COMMIT 8: docs(README) — rewrite for multi-file pipeline
+  Modified:  README.md
+    - What It Does: 5 steps → 8-step pipeline table
+    - Prerequisites: Python 3.12+ (was 3.10+)
+    - Setup Step 2: venv → new-env; added chardet to Batch 2
+    - .env config: LLM_PROVIDER, ANTHROPIC_MODEL, upload limit vars
+    - New section: "Switching LLM Provider"
+    - New section: "Upload Limits" reference table
+    - Project Structure: updated with all new files and services
+    - Troubleshooting: 3 new entries (chardet, migration, LLM_PROVIDER)
+
+--------------------------------------------------------------------------------
+SECTION 5: BUG FIXED DURING SESSION
+--------------------------------------------------------------------------------
+
+Issue: Files uploaded but showed "Failed" status with no error message in UI.
+       Backend terminal showed no errors.
+
+Root cause (confirmed):
+  1. chardet module was not installed in the backend virtual environment (new-env).
+     The `import chardet` at the top of parser.py crashed the background profiling
+     task immediately. The exception was caught silently by _parse_and_profile()
+     and stored in upload.error_message — but error_message was not included in
+     UploadResponse, so the frontend could not display it.
+
+  2. Alembic migration 0002 had not been applied. The staging_tables table was
+     created by Base.metadata.create_all() (which only creates new tables, never
+     alters existing ones), so the 5 new columns (encoding, delimiter, sheet_names,
+     active_sheet, grain_columns) did not exist in dev.db. Any INSERT with those
+     columns would have failed.
+
+Fixes applied:
+  - Confirmed chardet==5.2.0 already in new-env (was installed, just not on PATH python)
+  - Ran: alembic stamp 0001 (DB created via create_all, not alembic — no version record)
+  - Ran: alembic upgrade head (applied migration 0002 — added 5 new columns)
+  - Added error_message to UploadResponse schema so frontend can display actual errors
+  - Added error_message to UploadStatus polling in upload/page.tsx
+  - Added _run_migrations() to main.py startup (prevents this class of failure after
+    future schema changes — alembic upgrade head runs automatically on server start)
+
+Verification:
+  - Confirmed columns exist: encoding, delimiter, sheet_names, active_sheet, grain_columns
+  - Confirmed all imports work in new-env
+  - Backend restarted; uploads processed successfully
+
+--------------------------------------------------------------------------------
+SECTION 6: DATABASE MIGRATION NOTES
+--------------------------------------------------------------------------------
+
+If dev.db was created BEFORE this session (via Base.metadata.create_all), run:
+
+  cd backend
+  alembic stamp 0001           # tells alembic the DB is already at revision 0001
+  alembic upgrade head         # applies migration 0002 (adds new StagingTable columns)
+
+Going forward, main.py calls alembic upgrade head automatically on every startup,
+so manual migration runs are no longer needed for new team members.
+
+--------------------------------------------------------------------------------
+SECTION 7: ENVIRONMENT & CONFIGURATION NOTES
+--------------------------------------------------------------------------------
+
+The backend uses new-env (pyenv 3.12.10 virtual environment):
+  Activate (Windows):  .\backend\new-env\Scripts\Activate.ps1
+  Activate (Mac/Linux): source backend/new-env/bin/activate
+
+Python on PATH: C:\Python314\python.exe (Python 3.14 — NOT used for the project)
+Project Python: D:\Users\nida.bijapure\.pyenv\pyenv-win\versions\3.12.10
+
+All pip installs must use the venv pip:
+  .\backend\new-env\Scripts\pip install <package>
+
+.env file location: d:\report-factory\.env (project root — not inside backend/)
+Frontend env file:  d:\report-factory\frontend\.env.local
+
+Key env vars for the new pipeline:
+  LLM_PROVIDER=openai               # or: anthropic
+  OPENAI_API_KEY=...
+  OPENAI_MODEL=gpt-4o-mini
+  ANTHROPIC_API_KEY=...             # only needed if LLM_PROVIDER=anthropic
+  ANTHROPIC_MODEL=claude-sonnet-4-20250514
+  MAX_EXCEL_ROWS=200000
+  MAX_CSV_ROWS=200000
+  MAX_UPLOAD_FILES=10
+  MAX_COLUMNS_PER_FILE=200
+
+--------------------------------------------------------------------------------
+SECTION 8: GIT COMMIT HISTORY (this session)
+--------------------------------------------------------------------------------
+
+0c9f941  docs(README): rewrite for multi-file pipeline, LLM switch, new session pages
+2fc475b  feat(frontend/session): schema mapping, relationship detection, interview, KPI selection pages
+8cf3b94  feat(frontend/upload): multi-file batch upload UI with per-file status polling
+3c164fb  feat(templates): add story-driven sections array to all 4 KPI dashboard templates
+d427979  feat(session): multi-file session pipeline — relationships, interview, KPI suggestion, validation, generation
+6731a82  feat(upload): batch upload endpoint + deep file profiling with chardet & grain scoring
+828de28  feat(config): add dual LLM provider switch via .env (OpenAI / Anthropic)
+9eec58c  docs: update CLAUDE.md, add project plan, clean up stale PRD files
+
+All commits pushed to: origin/sourav_stagging
+
+--------------------------------------------------------------------------------
+SECTION 9: PENDING WORK (project_plan1.md — polish pass)
+--------------------------------------------------------------------------------
+
+[ ] Inline data validation step UI on KPI page (show errors before generate button)
+[ ] Dashboard section headers + story order rendering (extend dashboard/[recipeId]/page.tsx)
+[ ] Per-KPI chart type switcher on dashboard page
+[ ] Stress test: 200k row Excel upload — measure timeout, fix if > 60s
+[ ] Upload 10 files simultaneously — confirm batch endpoint handles concurrency
+[ ] Upload 200 column file — confirm profiling completes without crash
+
+DEFERRED (do not start until Flow 1 is end-to-end tested):
+[-] Flow 2 — dynamic AI interview
+[-] PostgreSQL migration (DATABASE_URL swap only)
+[-] pgvector semantic matching
+[-] Langfuse observability
+[-] BGO SSO / authentication
+[-] Scheduled report refresh
+
+--------------------------------------------------------------------------------
+SECTION 10: KEY FILE LOCATIONS
+--------------------------------------------------------------------------------
+
+Task tracker:       d:\report-factory\project_plan1.md
+Project plan:       d:\report-factory\claude_plan.md
+Product PRD:        d:\report-factory\PRD3.md
+Coding guidance:    d:\report-factory\CLAUDE.md
+
+Backend entry:      d:\report-factory\backend\main.py
+Session routes:     d:\report-factory\backend\api\routes\session.py
+Upload routes:      d:\report-factory\backend\api\routes\upload.py
+AI client:          d:\report-factory\backend\services\ai_client.py
+Parser:             d:\report-factory\backend\services\parser.py
+Profiler:           d:\report-factory\backend\services\profiler.py
+KPI catalog:        d:\report-factory\backend\catalog\kpis.json
+Templates:          d:\report-factory\backend\catalog\templates\
+
+Frontend upload:    d:\report-factory\frontend\app\upload\page.tsx
+Schema page:        d:\report-factory\frontend\app\session\[datasetId]\schema\page.tsx
+Interview page:     d:\report-factory\frontend\app\session\[datasetId]\interview\page.tsx
+KPI page:           d:\report-factory\frontend\app\session\[datasetId]\kpis\page.tsx
+API client:         d:\report-factory\frontend\lib\api.ts
+Types:              d:\report-factory\frontend\lib\types.ts
+
+================================================================================
+END OF SESSION LOG
+================================================================================
