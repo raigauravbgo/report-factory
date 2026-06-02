@@ -8,6 +8,7 @@ from api.routes import interview as interview_router
 from api.routes import kpis as kpis_router
 from api.routes import reports as reports_router
 from api.routes import dashboard as dashboard_router
+from api.routes import session as session_router
 from db.database import init_db
 
 # Import all models so SQLAlchemy registers them before create_all
@@ -33,7 +34,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create SQLAlchemy tables (upload/interview routes)
+# Run Alembic migrations (adds new columns to existing tables).
+# create_all() only creates missing tables; migrations handle ALTER TABLE.
+def _run_migrations() -> None:
+    from alembic.config import Config
+    from alembic import command
+    import os
+
+    cfg = Config(os.path.join(os.path.dirname(__file__), "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "migrations"))
+    try:
+        command.upgrade(cfg, "head")
+    except Exception as exc:
+        # Log but don't crash — tables may already be correct
+        import logging
+        logging.getLogger(__name__).warning("Alembic upgrade skipped: %s", exc)
+
+
+_run_migrations()
+
+# Fallback: also ensure any brand-new tables get created
 Base.metadata.create_all(bind=engine)
 
 # Ensure PRD3 schema tables exist on startup (idempotent)
@@ -48,6 +68,7 @@ app.include_router(interview_router.router)
 app.include_router(kpis_router.router)
 app.include_router(reports_router.router)
 app.include_router(dashboard_router.router)
+app.include_router(session_router.router)
 
 
 @app.get("/health")
