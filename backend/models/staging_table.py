@@ -15,6 +15,12 @@ class StagingTable(Base):
     column_count: Mapped[int] = mapped_column(Integer, nullable=False)
     duplicate_row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     profile_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Deep profiling metadata
+    encoding: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    delimiter: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    sheet_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    active_sheet: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    grain_columns: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     upload: Mapped["Upload"] = relationship(back_populates="staging_table")

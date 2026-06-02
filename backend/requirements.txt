@@ -1,4 +1,4 @@
-# Core API
+# ── Core API ──────────────────────────────────────────────────────────────────
 fastapi==0.136.1
 uvicorn[standard]==0.47.0
 pydantic==2.13.4
@@ -6,25 +6,30 @@ pydantic-settings==2.14.1
 python-multipart==0.0.29
 httpx==0.28.1
 
-# Agent
+# ── AI — Agent & LLM providers ───────────────────────────────────────────────
 google-adk==2.1.0
 litellm==1.85.0
 anthropic==0.105.2
+openai==2.37.0
 
-# Data
+# ── Data processing ───────────────────────────────────────────────────────────
 pandas==2.3.0
 openpyxl==3.1.5
+chardet==5.2.0
 
-# Export
+# ── Export ────────────────────────────────────────────────────────────────────
 python-pptx==1.0.2
 
-# Storage (legacy upload route — local fallback active)
-boto3>=1.35.0
+# ── Storage ───────────────────────────────────────────────────────────────────
+boto3==1.38.0
 
-# Legacy SQLAlchemy layer (existing upload/interview routes)
+# ── Database ──────────────────────────────────────────────────────────────────
 sqlalchemy==2.0.49
 alembic==1.18.4
+
+# ── Auth / security ───────────────────────────────────────────────────────────
 cryptography==48.0.0
 python-jose[cryptography]==3.5.0
-openai==2.37.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
 asteval==1.0.8
