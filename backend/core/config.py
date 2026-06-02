@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     azure_openai_deployment: str = ""
     use_azure_openai: bool = False
 
+    # LLM provider for all AI calls (interview, profiling, suggestions)
+    # "openai" (default) | "anthropic" | "azure"
+    # Switch via .env only — no code change required
+    llm_provider: str = "openai"
+    anthropic_model: str = "claude-sonnet-4-20250514"
+
     # AI — Flow 2 (ADK Agent)
     # adk_provider: "openai" uses LiteLLM + OPENAI_API_KEY (no extra key needed)
     #               "anthropic" uses Claude directly + ANTHROPIC_API_KEY
@@ -34,6 +40,12 @@ class Settings(BaseSettings):
     # adk_enabled: True = try ADK first, fall back to Flow 1 (OpenAI) on failure
     #              False = Flow 1 only (default — safe, always works)
     adk_enabled: bool = False
+
+    # Upload limits
+    max_excel_rows: int = 200_000
+    max_csv_rows: int = 200_000
+    max_upload_files: int = 10
+    max_columns_per_file: int = 200
 
     # App
     app_env: str = "development"
