@@ -1,7 +1,7 @@
 """
 Seed the KPI catalog into SQLite.
 Run once from the backend/ directory: python seed_catalog.py
-Idempotent — safe to re-run; clears and re-inserts catalog entries.
+Idempotent — safe to re-run; upserts catalog entries without touching user-created KPIs.
 """
 import json
 import sys
@@ -23,25 +23,26 @@ def seed() -> None:
     print(f"Seeding {len(catalog)} KPIs...")
 
     with get_conn() as conn:
-        conn.execute("DELETE FROM kpi_catalog")
         for kpi in catalog:
             conn.execute(
-                """INSERT INTO kpi_catalog
+                """INSERT OR REPLACE INTO kpi_catalog
                    (kpi_id, display_name, description, numerator, denominator,
-                    format, domain, expected_range, aliases, source_fields, reviewed)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    format, domain, expected_range, aliases, source_fields, reviewed,
+                    aggregation)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     kpi["kpi_id"],
-                    kpi["display_name"],
+                    kpi.get("display_name", kpi["kpi_id"]),
                     kpi.get("description", ""),
-                    kpi["numerator"],
-                    kpi["denominator"],
-                    kpi["format"],
-                    kpi["domain"],
+                    kpi.get("numerator", ""),
+                    kpi.get("denominator", "_none_"),
+                    kpi.get("format", "decimal"),
+                    kpi.get("domain", ""),
                     json.dumps(kpi.get("expected_range")) if kpi.get("expected_range") else None,
                     json.dumps(kpi.get("aliases", [])),
                     json.dumps(kpi.get("source_fields", [])),
                     1 if kpi.get("reviewed") else 0,
+                    kpi.get("aggregation", ""),
                 ),
             )
 

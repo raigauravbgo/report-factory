@@ -11,6 +11,8 @@ POST /session/{dataset_id}/generate           create recipe + return recipe_id
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -19,6 +21,7 @@ from core.database import get_db
 from models.upload import Upload
 from services import schema_relationships as sr
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/session", tags=["session"])
 
 
@@ -60,9 +63,20 @@ class InterviewStateResponse(BaseModel):
 
 class InterviewTurnResponse(BaseModel):
     message: str
-    step: int
+    step_index: int
+    step_label: str
     completed: bool
     interview_result: dict | None = None
+
+
+_STEP_LABELS = [
+    "Data type",
+    "Date column",
+    "KPI definitions",
+    "Dimensions",
+    "Time granularity",
+    "Filters",
+]
 
 
 @router.post("/{dataset_id}/interview", response_model=InterviewTurnResponse)
@@ -77,9 +91,21 @@ def interview_turn(dataset_id: int, body: InterviewRequest, db: Session = Depend
         history=[m.model_dump() for m in body.history],
         profiles=profiles,
     )
+    if completed:
+        logger.info(
+            "SESSION_INTERVIEW_DONE dataset_id=%d date_col=%r dims=%s granularity=%s",
+            dataset_id,
+            result.get("date_column") if result else None,
+            result.get("dimensions", []) if result else [],
+            result.get("granularity") if result else None,
+        )
+    else:
+        logger.info("SESSION_INTERVIEW_TURN dataset_id=%d step=%d", dataset_id, step)
+    label = _STEP_LABELS[step - 1] if 1 <= step <= len(_STEP_LABELS) else f"Step {step}"
     return InterviewTurnResponse(
         message=response_text,
-        step=step,
+        step_index=step,
+        step_label=label,
         completed=completed,
         interview_result=result,
     )
@@ -117,7 +143,8 @@ def kpi_suggestions(dataset_id: int, body: KpiSuggestRequest, db: Session = Depe
 # ── Validation ────────────────────────────────────────────────────────────────
 
 class ValidateRequest(BaseModel):
-    selected_kpi_ids: list[str] = []
+    selected_kpi_ids: list[str] = []   # legacy: catalog kpi_ids
+    selected_kpis: list[dict] = []     # AI-generated: full KPI dicts with formula
 
 
 @router.post("/{dataset_id}/validate")
@@ -132,14 +159,19 @@ def validate_data(dataset_id: int, body: ValidateRequest, db: Session = Depends(
         if st:
             staging_tables.append(st)
 
-    result = validate(staging_tables, body.selected_kpi_ids, db)
+    result = validate(
+        staging_tables,
+        body.selected_kpi_ids,
+        db,
+        selected_kpis=body.selected_kpis,
+    )
     return result
 
 
 # ── Dashboard Generation ──────────────────────────────────────────────────────
 
 class GenerateRequest(BaseModel):
-    selected_kpi_ids: list[str] = []
+    selected_kpis: list[dict] = []
     confirmed_relationships: list[dict] = []
     interview_result: dict = {}
 
@@ -154,10 +186,15 @@ def generate_dashboard(dataset_id: int, body: GenerateRequest, db: Session = Dep
 
     recipe_id = generate_from_session(
         dataset_id=dataset_id,
-        selected_kpi_ids=body.selected_kpi_ids,
+        selected_kpis=body.selected_kpis,
         confirmed_relationships=body.confirmed_relationships,
         interview_result=body.interview_result,
         db=db,
+    )
+    logger.info(
+        "GENERATE_DONE dataset_id=%d recipe_id=%d kpis=%d date_col=%r",
+        dataset_id, recipe_id, len(body.selected_kpis),
+        body.interview_result.get("date_column"),
     )
     return GenerateResponse(recipe_id=recipe_id)
 
@@ -172,7 +209,13 @@ def _load_profiles(dataset_id: int, upload_ids: list[int], db: Session) -> list[
         query = query.filter(Upload.id.in_(upload_ids))
     staging_rows = query.all()
     return [
-        {**st.profile_data, "filename": st.upload.filename}
+        {
+            **st.profile_data,
+            "filename": st.upload.filename,
+            # Passed to kpi_suggester so it can load actual rows instead of
+            # reconstructing from per-column sample_values.
+            "staging_table_name": st.table_name,
+        }
         for st in staging_rows
         if st.profile_data
     ]

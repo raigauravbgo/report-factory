@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 import UploadZone from "@/components/UploadZone";
 import { api } from "@/lib/api";
+import { logEvent } from "@/lib/logger";
 import type { UploadStatus } from "@/lib/types";
 
 interface FileEntry {
@@ -41,6 +42,13 @@ export default function UploadPage() {
     setUploadError("");
     setUploading(true);
 
+    const totalKB = selected.reduce((s, f) => s + f.size / 1024, 0);
+    logEvent("files_selected", "upload", {
+      count: selected.length,
+      filenames: selected.map((f) => f.name),
+      total_size_kb: Math.round(totalKB),
+    });
+
     let batchRes;
     try {
       batchRes = await api.uploadBatch(selected);
@@ -50,6 +58,7 @@ export default function UploadPage() {
       return;
     }
 
+    logEvent("upload_started", "upload", { file_count: selected.length }, { datasetId: batchRes.dataset_id });
     setDatasetId(batchRes.dataset_id);
     const entries: FileEntry[] = batchRes.uploads.map((u) => ({
       uploadId: u.upload_id,
@@ -74,6 +83,11 @@ export default function UploadPage() {
           if (res.status === "profiled" || res.status === "failed") {
             clearInterval(pollingRef.current[entry.upload_id]);
             delete pollingRef.current[entry.upload_id];
+            logEvent("upload_file_profiled", "upload", {
+              upload_id: entry.upload_id,
+              filename: entry.filename,
+              status: res.status,
+            });
           }
         } catch {
           clearInterval(pollingRef.current[entry.upload_id]);
@@ -95,11 +109,11 @@ export default function UploadPage() {
 
   const handleContinue = () => {
     if (!datasetId) return;
-    // Persist upload list so schema page can load profiles without a dataset API endpoint
     sessionStorage.setItem(
       `dataset_${datasetId}_uploads`,
       JSON.stringify(files.map((f) => ({ uploadId: f.uploadId, filename: f.filename }))),
     );
+    logEvent("continue_to_schema", "upload", { upload_count: files.length }, { datasetId });
     router.push(`/session/${datasetId}/schema`);
   };
 

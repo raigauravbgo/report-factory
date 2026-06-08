@@ -9,8 +9,11 @@ httpx==0.28.1
 # ── AI — Agent & LLM providers ───────────────────────────────────────────────
 google-adk==2.1.0
 litellm==1.85.0
+
+# litellm==1.83.7
 anthropic==0.105.2
 openai==2.37.0
+# openai==2.30.0
 
 # ── Data processing ───────────────────────────────────────────────────────────
 pandas==2.3.0

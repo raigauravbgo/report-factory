@@ -38,7 +38,11 @@ def _create_session(session_id: str) -> None:
             user_id="default",
             session_id=session_id,
         )
-    asyncio.run(_create())
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_create())
+    finally:
+        loop.close()
 
 
 def run_turn(session_id: str, user_message: str) -> str:

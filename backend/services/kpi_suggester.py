@@ -1,13 +1,67 @@
+"""
+AI-driven KPI identification.
+
+Replaces the old SequenceMatcher catalog-matching approach.
+
+For each uploaded file the AI receives:
+  - Column names and their profiler-detected types
+  - 5-7 actual data rows from the staging table (or reconstructed from
+    per-column sample_values when the staging table name is unavailable)
+
+The AI then:
+  1. Validates each column's true data type using both name patterns and
+     sample values (catches Excel string-stored numbers, serial dates, etc.)
+  2. Identifies every meaningful KPI computable from the available columns
+  3. Returns formulas that reference the exact original column names
+
+Returned suggestions are drop-in compatible with the rest of the pipeline:
+  session_generator.py  → writes formulas into recipe config
+  compute.py            → evaluates those formulas against the staging DataFrame
+"""
 from __future__ import annotations
 
 import json
-import os
-from difflib import SequenceMatcher
+import logging
+import re
 from pathlib import Path
 
+import pandas as pd
+from sqlalchemy import text
+
+from core.database import engine
+from services.ai_client import chat_complete
+
+logger = logging.getLogger(__name__)
 
 _CATALOG_PATH = Path(__file__).parent.parent / "catalog" / "kpis.json"
 _catalog_cache: list[dict] | None = None
+
+# Formula patterns that compute.py/_eval_formula can handle
+_FORMULA_GUIDE = """
+Supported formula syntax (use ONLY these patterns):
+  column_name                          → sum of that column
+  mean(column_name)                    → average of that column
+  sum(column_name)                     → explicit sum
+  count(column_name)                   → non-null row count
+  numerator_col / denominator_col      → ratio (compute.py evaluates this as ratio)
+  numerator_col / (col_a + col_b)      → ratio with compound denominator
+
+Aggregation rules — CRITICAL, follow exactly:
+  - Columns containing "percent" or "pct" in their name → use mean(column_name)
+  - Rating / score columns (csat, nps, score, rating) → use mean(column_name)
+  - Ratio columns already stored as a fraction or 0–100 scale → use mean(column_name)
+  - Count / volume / total columns → use sum(column_name) or count(column_name)
+  - Computed ratios (numerator / denominator) → use col_a / col_b directly
+
+Column name rules:
+- Use the EXACT original column name (preserve case, spaces, special chars).
+- Only reference columns confirmed present and numeric in this dataset.
+- Do NOT invent column names that are not in the dataset.
+
+Date handling:
+- Dates stored as DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, or Excel serial (46110…) are DATE columns.
+- Do NOT use date columns as KPI numerators or denominators.
+"""
 
 
 def _load_catalog() -> list[dict]:
@@ -18,110 +72,309 @@ def _load_catalog() -> list[dict]:
     return _catalog_cache
 
 
-def suggest(profiles: list[dict], interview_answers: dict) -> list[dict]:
+def _load_sample_rows(table_name: str, n: int = 7) -> list[dict]:
+    """Load n rows from a staging table using LIMIT — avoids full-table scan."""
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(
+                text(f'SELECT * FROM "{table_name}" LIMIT :n'),
+                con=conn,
+                params={"n": n},
+            )
+        return df.fillna("").to_dict(orient="records")
+    except Exception as exc:
+        logger.warning("kpi_suggester: could not load staging table %r: %s", table_name, exc)
+        return []
+
+
+def _reconstruct_sample_rows(columns: list[dict], n: int = 7) -> list[dict]:
     """
-    Match uploaded column names against the KPI catalog.
-    Returns a ranked list of KpiSuggestion dicts.
+    Reconstruct row-oriented samples from per-column sample_values.
+
+    Note: values from different columns may not be from the same physical row,
+    but they are sufficient for the AI to infer data types and value ranges.
     """
+    max_len = max((len(c.get("sample_values", [])) for c in columns), default=0)
+    rows: list[dict] = []
+    for i in range(min(max_len, n)):
+        row = {}
+        for col in columns:
+            vals = col.get("sample_values", [])
+            if i < len(vals) and vals[i] is not None:
+                row[col["name"]] = vals[i]
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _build_prompt(file_contexts: list[dict], interview_answers: dict) -> str:
     catalog = _load_catalog()
-    col_names = [c["name"] for p in profiles for c in p.get("columns", [])]
-    domain_filter = _extract_domain(interview_answers)
-    interview_text = _interview_text(interview_answers).lower()
 
-    results: list[dict] = []
+    # Build a rich catalog reference with source_fields + aliases so the AI can
+    # match standard KPIs to the actual column names in the dataset.
+    catalog_lines: list[str] = []
+    for k in catalog:
+        fields = k.get("source_fields", [])
+        aliases = k.get("aliases", [])
+        fmt = k.get("format", "decimal")
+        catalog_lines.append(
+            f"  {k['kpi_id']} | {k['display_name']} [{k['domain']}] | "
+            f"format={fmt} | source_fields={fields} | aliases={aliases}"
+        )
+    catalog_ref = "\n".join(catalog_lines)
 
-    for kpi in catalog:
-        kpi_domain = kpi.get("domain", "")
+    domain_hint = (
+        interview_answers.get("domain") or interview_answers.get("q1") or ""
+    ).strip()
+    domain_context = f"\nBusiness context: {domain_hint}\n" if domain_hint else ""
 
-        # Build a list of field names to match against from the KPI definition
-        candidates: list[str] = []
-        candidates.extend(kpi.get("source_fields") or [])
-        candidates.extend(kpi.get("aliases") or [])
-        if kpi.get("numerator"):
-            candidates.append(kpi["numerator"])
-        if kpi.get("denominator"):
-            candidates.append(kpi["denominator"])
-
-        best_score = 0.0
-        matched_cols: dict[str, str] = {}
-
-        for col in col_names:
-            for candidate in candidates:
-                score = SequenceMatcher(None, col.lower(), candidate.lower()).ratio()
-                if score > best_score:
-                    best_score = score
-                if score > 0.65:
-                    matched_cols[candidate] = col
-
-        # Interview context boost: if the interview mentions this KPI's name or key fields
-        boost = 0.0
-        kpi_lower = kpi.get("kpi_id", "").replace("_", " ")
-        if kpi_lower in interview_text or kpi.get("display_name", "").lower() in interview_text:
-            boost = 0.15
-
-        final_score = min(best_score + boost, 1.0)
-
-        if final_score < 0.4:
-            continue
-
-        results.append({
-            "kpi_id": kpi["kpi_id"],
-            "display_name": kpi.get("display_name", kpi["kpi_id"]),
-            "formula": f"{kpi.get('numerator', '?')} / {kpi.get('denominator', '?')}",
-            "confidence": round(final_score, 2),
-            "matched_columns": matched_cols,
-            "source": "catalog",
-            "domain": kpi_domain,
-            "description": kpi.get("description", ""),
-        })
-
-    # Add custom KPIs from interview if user defined formulas
-    for custom in _extract_custom_kpis(interview_answers):
-        results.append({
-            "kpi_id": f"custom_{custom['name'].lower().replace(' ', '_')}",
-            "display_name": custom["name"],
-            "formula": custom.get("formula", ""),
-            "confidence": 1.0,
-            "matched_columns": {},
-            "source": "interview",
-            "domain": domain_filter or "custom",
-            "description": "User-defined KPI",
-        })
-
-    # Sort: interview-sourced first, then by confidence
-    results.sort(key=lambda r: (r["source"] != "interview", -r["confidence"]))
-
-    # Apply domain filter if available (keep all but rank matching domain higher)
-    if domain_filter:
-        results.sort(
-            key=lambda r: (r["domain"] != domain_filter, r["source"] != "interview", -r["confidence"])
+    file_blocks: list[str] = []
+    for ctx in file_contexts:
+        col_lines = "\n".join(
+            f"  {c['name']}  |  {c.get('detected_type', 'unknown')}  |  "
+            f"samples: {c.get('sample_values', [])[:4]}"
+            for c in ctx["columns"]
+        )
+        row_lines = "\n".join(
+            json.dumps(r, default=str) for r in ctx["sample_rows"][:7]
+        )
+        file_blocks.append(
+            f"=== File: {ctx['filename']} ===\n"
+            f"Columns  (name | profiler_type | first 4 sample values):\n{col_lines}\n\n"
+            f"Sample rows (actual data — use to validate data types and value ranges):\n{row_lines}"
         )
 
+    files_section = "\n\n".join(file_blocks)
+
+    return f"""You are given one or more operational datasets. Return ALL meaningful KPIs computable from the available columns.
+{domain_context}
+{files_section}
+
+Standard KPI catalog (kpi_id | display_name [domain] | format | source_fields | aliases):
+{catalog_ref}
+
+Instructions — follow ALL steps in order:
+
+STEP 1 — Validate data types using sample values:
+  - Values like "01-01-2024", "31/12/2023", "2024-01-01" → DATE column (skip as KPI input)
+  - Values like 46110, 46111 → Excel serial DATE column (skip as KPI input)
+  - Column name contains "id", "ref", "key", "code", "uuid" → IDENTIFIER column (skip)
+  - Column name contains "email", "phone", "address", "name" → PII TEXT column (skip)
+  - All remaining numeric columns are eligible KPI inputs.
+
+STEP 2 — Match catalog KPIs to this dataset:
+  For EACH catalog entry whose source_fields or aliases match any column in this dataset
+  (use fuzzy/partial matching — e.g. "contacts" matches "total_contacts", "live_contacts"):
+  - Suggest that KPI with the formula adapted to the EXACT actual column names found.
+  - If the catalog formula requires multiple columns, only suggest it if ALL required columns exist.
+  - Use the catalog's format field directly.
+
+STEP 3 — Suggest additional KPIs from remaining columns:
+  For numeric columns NOT covered by catalog KPIs:
+  - Suggest any meaningful KPI (sum, mean, ratio) derivable from those columns.
+  - Infer format from column name: "percent"/"pct"/"rate" → percentage, "amount"/"revenue" → currency, etc.
+
+STEP 4 — Apply correct aggregation for each KPI:
+  - "percent" or "pct" in column name → mean(column_name) and format=percentage
+  - "rating", "score", "csat", "nps" in column name → mean(column_name) and format=decimal
+  - "count", "total", "volume" → sum(column_name) and format=integer
+  - Ratio of two columns → numerator_col / denominator_col
+
+STEP 5 — Remove duplicates: if two suggestions have the same formula (ignoring whitespace),
+  keep only the one with the higher confidence.
+
+{_FORMULA_GUIDE}
+
+Return ONLY a valid JSON array — no markdown fences, no explanation:
+[
+  {{
+    "kpi_id": "snake_case_id",
+    "display_name": "Human Readable Name",
+    "description": "One sentence.",
+    "formula": "exact_col / another_exact_col",
+    "aggregation": "sum | average | ratio_of_sums | (leave empty for plain ratio)",
+    "format": "percentage | integer | currency | duration | decimal",
+    "domain": "collections | cx | sales | workforce | ops",
+    "confidence": 0.95,
+    "catalog_match": "kpi_id from catalog, or empty string if not a catalog KPI"
+  }}
+]"""
+
+
+def _parse_ai_response(raw: str) -> list[dict]:
+    """Parse the AI JSON into standardised KPI suggestion dicts."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("kpi_suggester: AI returned non-JSON response: %.200s", raw)
+        return []
+
+    # Some models wrap the array in {"kpis": [...]} or {"suggestions": [...]}
+    if isinstance(data, dict):
+        data = data.get("kpis") or data.get("suggestions") or list(data.values())
+    if not isinstance(data, list):
+        return []
+
+    results: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_formulas: set[str] = set()
+
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        kpi_id = str(item.get("kpi_id") or "").strip()
+        formula = str(item.get("formula") or "").strip()
+        if not kpi_id or not formula:
+            continue
+
+        # Deduplicate by kpi_id
+        if kpi_id in seen_ids:
+            continue
+        # Deduplicate by normalised formula (whitespace + case stripped)
+        formula_norm = re.sub(r"\s+", "", formula.lower())
+        if formula_norm in seen_formulas:
+            logger.info("kpi_suggester: dropped duplicate formula %r (%r)", formula, kpi_id)
+            continue
+
+        seen_ids.add(kpi_id)
+        seen_formulas.add(formula_norm)
+        results.append({
+            "kpi_id": kpi_id,
+            "display_name": item.get("display_name") or kpi_id.replace("_", " ").title(),
+            "formula": formula,
+            "confidence": float(item.get("confidence") or 0.9),
+            "matched_columns": {},
+            "source": "ai",
+            "domain": str(item.get("domain") or ""),
+            "description": str(item.get("description") or ""),
+            "aggregation": str(item.get("aggregation") or ""),
+            "format": str(item.get("format") or ""),
+            "catalog_match": str(item.get("catalog_match") or ""),
+        })
+
+    results.sort(key=lambda r: -r["confidence"])
     return results
 
 
-def _extract_domain(interview_answers: dict) -> str:
-    """Try to infer domain from Q1 answer."""
-    domain_q = interview_answers.get("domain") or interview_answers.get("q1") or ""
-    domain_q = domain_q.lower()
-    if any(w in domain_q for w in ["collect", "debt", "payment", "ptp"]):
-        return "collections"
-    if any(w in domain_q for w in ["cx", "customer", "support", "csat", "nps"]):
-        return "cx"
-    if any(w in domain_q for w in ["workforce", "hr", "agent", "headcount", "attrition"]):
-        return "workforce"
-    if any(w in domain_q for w in ["sales", "revenue", "lead", "pipeline"]):
-        return "sales"
-    return ""
+def _filter_valid_formulas(suggestions: list[dict], col_names: list[str]) -> list[dict]:
+    """
+    Discard AI suggestions whose formula doesn't reference any real column.
+
+    Normalises column names (lowercase + underscores) for comparison so that
+    'Avg Handle Time' matches 'avg_handle_time' in a formula.
+    """
+    if not col_names:
+        return suggestions
+
+    # Build lookup: original name, lowercased, and underscore-normalised
+    lookup: set[str] = set()
+    for c in col_names:
+        lookup.add(c)
+        lookup.add(c.lower())
+        lookup.add(re.sub(r"[^a-z0-9]+", "_", c.lower()).strip("_"))
+
+    AGG_FUNCS = {"mean", "avg", "average", "sum", "count"}
+
+    valid: list[dict] = []
+    for s in suggestions:
+        formula = s.get("formula", "")
+        # Extract all word-like tokens (handles both snake_case and "Spaced Names")
+        tokens: set[str] = set()
+        for tok in re.findall(r"[A-Za-z][A-Za-z0-9_ ]*[A-Za-z0-9]|[A-Za-z][A-Za-z0-9]*", formula):
+            tokens.add(tok)
+            tokens.add(tok.lower())
+            tokens.add(re.sub(r"[^a-z0-9]+", "_", tok.lower()).strip("_"))
+        tokens -= AGG_FUNCS
+        if tokens & lookup:
+            valid.append(s)
+        else:
+            logger.info(
+                "kpi_suggester: dropped %r — formula %r references no known column",
+                s.get("kpi_id"), formula,
+            )
+    return valid
 
 
-def _interview_text(answers: dict) -> str:
-    return " ".join(str(v) for v in answers.values() if v)
+def suggest(profiles: list[dict], interview_answers: dict) -> list[dict]:
+    """
+    AI-driven KPI suggestion.
 
+    Sends column names + data samples for every uploaded file to the LLM and
+    asks it to identify computable KPIs with formulas using exact column names.
 
-def _extract_custom_kpis(answers: dict) -> list[dict]:
-    """Extract user-defined KPI specs from interview answers."""
-    kpis = answers.get("kpis") or []
-    if isinstance(kpis, list):
-        return [k for k in kpis if isinstance(k, dict) and k.get("name")]
-    return []
+    Parameters
+    ----------
+    profiles          : list of profile dicts from _load_profiles() in session.py.
+                        Each dict is the StagingTable.profile_data merged with
+                        {"filename": ..., "staging_table_name": ...}.
+    interview_answers : collected answers from the Flow 1 interview (may be empty).
+
+    Returns
+    -------
+    List of KPI suggestion dicts compatible with the recipe + compute pipeline.
+    """
+    if not profiles:
+        return []
+
+    file_contexts: list[dict] = []
+    for profile in profiles:
+        columns = profile.get("columns", [])
+        filename = profile.get("filename", "dataset")
+        staging_table_name = profile.get("staging_table_name")
+
+        col_info = [
+            {
+                "name": c["name"],
+                "detected_type": c.get("detected_type", "unknown"),
+                "sample_values": [
+                    v for v in c.get("sample_values", []) if v is not None
+                ][:5],
+            }
+            for c in columns
+        ]
+
+        sample_rows = (
+            _load_sample_rows(staging_table_name)
+            if staging_table_name
+            else _reconstruct_sample_rows(col_info)
+        )
+
+        file_contexts.append(
+            {
+                "filename": filename,
+                "columns": col_info,
+                "sample_rows": sample_rows,
+            }
+        )
+
+    prompt = _build_prompt(file_contexts, interview_answers)
+
+    try:
+        raw = chat_complete(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a BI analyst specialising in contact-centre and collections reporting. "
+                        "Respond with valid JSON only — no markdown, no explanation."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            json_mode=True,
+        )
+    except Exception as exc:
+        logger.error("kpi_suggester: AI call failed: %s", exc)
+        return []
+
+    suggestions = _parse_ai_response(raw)
+    # Collect all column names across every file for formula validation
+    all_col_names = [c["name"] for ctx in file_contexts for c in ctx["columns"]]
+    suggestions = _filter_valid_formulas(suggestions, all_col_names)
+    logger.info(
+        "kpi_suggester: AI returned %d suggestions for %d file(s)",
+        len(suggestions),
+        len(profiles),
+    )
+    return suggestions

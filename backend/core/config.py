@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     database_url: str
 
     # S3
-    s3_bucket: str
+    s3_bucket: str = ""
     s3_region: str = "us-east-1"
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # App
     app_env: str = "development"
     max_upload_size_mb: int = 50
+
+    # CORS — comma-separated list of allowed origins.
+    # Set ALLOWED_ORIGINS in .env for production, e.g.:
+    #   ALLOWED_ORIGINS=https://reports.bgo.com,https://staging.bgo.com
+    allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     # Cache — in-memory for MVP; set redis_url to enable Redis
     redis_url: str = ""

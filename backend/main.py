@@ -1,14 +1,22 @@
-from fastapi import FastAPI
+import logging
+import time
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 from core.database import Base, engine
+from core.logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 from api.routes import upload as upload_router
 from api.routes import interview as interview_router
 from api.routes import kpis as kpis_router
 from api.routes import reports as reports_router
 from api.routes import dashboard as dashboard_router
 from api.routes import session as session_router
+from api.routes import log as log_router
 from db.database import init_db
 
 # Import all models so SQLAlchemy registers them before create_all
@@ -28,11 +36,26 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    logger.info(
+        "HTTP %s %s → %d  (%.0fms)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
 
 # Run Alembic migrations (adds new columns to existing tables).
 # create_all() only creates missing tables; migrations handle ALTER TABLE.
@@ -45,10 +68,9 @@ def _run_migrations() -> None:
     cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "migrations"))
     try:
         command.upgrade(cfg, "head")
+        logger.info("MIGRATIONS_OK alembic upgrade head completed")
     except Exception as exc:
-        # Log but don't crash — tables may already be correct
-        import logging
-        logging.getLogger(__name__).warning("Alembic upgrade skipped: %s", exc)
+        logger.warning("MIGRATIONS_SKIP alembic upgrade skipped: %s", exc)
 
 
 _run_migrations()
@@ -62,6 +84,7 @@ init_db()
 # Seed KPI catalog so AI interview can reference KPIs
 from seed_catalog import seed as seed_kpi_catalog
 seed_kpi_catalog()
+logger.info("STARTUP BGO Report Factory v1.0 ready — env=%s", settings.app_env)
 
 app.include_router(upload_router.router)
 app.include_router(interview_router.router)
@@ -69,6 +92,7 @@ app.include_router(kpis_router.router)
 app.include_router(reports_router.router)
 app.include_router(dashboard_router.router)
 app.include_router(session_router.router)
+app.include_router(log_router.router)
 
 
 @app.get("/health")

@@ -53,7 +53,7 @@ export default function InterviewPage() {
     if (userMessage) setMessages(newHistory);
 
     try {
-      const res = await api.sendInterviewMessage(uploadId, userMessage, newHistory);
+      const res = await api.sendInterviewMessageLegacy(uploadId, userMessage, newHistory);
       setMessages([...newHistory, { role: "assistant", content: res.message }]);
       setStepIndex(res.step_index);
       if (res.completed && res.interview_result) {

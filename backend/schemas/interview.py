@@ -12,6 +12,7 @@ STEP_LABELS = [
 class KpiSpec(BaseModel):
     name: str
     formula: str
+    aggregation: str = ""
 
 
 class InterviewResult(BaseModel):

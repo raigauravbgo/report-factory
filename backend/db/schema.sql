@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS kpi_catalog (
     expected_range TEXT,           -- JSON: {"min": 0, "max": 1} or null
     aliases       TEXT,            -- JSON array
     source_fields TEXT,            -- JSON array
-    reviewed      INTEGER DEFAULT 0
+    reviewed      INTEGER DEFAULT 0,
+    aggregation   TEXT DEFAULT ''  -- ratio_of_sums | average | (empty = default sum/ratio)
 );
 
 CREATE TABLE IF NOT EXISTS schema_memory (

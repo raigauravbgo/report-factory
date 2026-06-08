@@ -1,63 +1,148 @@
 import io
+import logging
+import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from core.database import get_db
 from models.report_recipe import ReportRecipe
 from models.staging_table import StagingTable
+from models.upload import Upload
 from services.compute import compute_dashboard, get_filter_options
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 def _get_recipe_and_staging(recipe_id: int, db: Session):
+    """Return (recipe, config, primary_staging, all_table_names).
+
+    all_table_names includes every staging table for the dataset so that
+    multi-file uploads (e.g. Adherence + CSAT) are concatenated in compute.
+    """
     recipe = db.query(ReportRecipe).filter(ReportRecipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(404, "Recipe not found.")
     config = recipe.config
     upload_id = config.get("upload_id")
-    if not upload_id:
-        raise HTTPException(400, "Recipe has no upload_id.")
-    staging = db.query(StagingTable).filter(StagingTable.upload_id == upload_id).first()
-    if not staging:
+    dataset_id = config.get("dataset_id")
+
+    # Primary staging table (backward compat — must resolve)
+    primary: StagingTable | None = None
+    if upload_id:
+        primary = db.query(StagingTable).filter(StagingTable.upload_id == upload_id).first()
+
+    # Collect ALL staging tables for the dataset to support multi-file compute.
+    # If dataset_id is present use it; otherwise fall back to single upload.
+    all_table_names: list[str] = []
+    if dataset_id:
+        uploads = db.query(Upload).filter(Upload.dataset_id == dataset_id).all()
+        for u in uploads:
+            st = db.query(StagingTable).filter(StagingTable.upload_id == u.id).first()
+            if st:
+                all_table_names.append(st.table_name)
+
+    if not all_table_names and primary:
+        all_table_names = [primary.table_name]
+
+    if not primary and all_table_names:
+        primary = db.query(StagingTable).filter(
+            StagingTable.table_name == all_table_names[0]
+        ).first()
+
+    if not primary:
         raise HTTPException(404, "Staging data not found. Re-upload the file.")
-    return recipe, config, staging
+
+    return recipe, config, primary, all_table_names
+
+
+@router.get("/{recipe_id}/validate-config")
+def validate_config(recipe_id: int, db: Session = Depends(get_db)):
+    """
+    Pre-flight data integrity check: verifies the recipe config works against real data.
+    Returns { valid, errors, warnings, details }.
+    Used by the recipe editor before approval and by the dashboard on first load.
+    """
+    recipe, config, _staging, all_table_names = _get_recipe_and_staging(recipe_id, db)
+    from services.compute import validate_dashboard_config
+    result = validate_dashboard_config(config, all_table_names)
+    logger.info(
+        "VALIDATE_CONFIG recipe_id=%d valid=%s errors=%d warnings=%d",
+        recipe_id, result["valid"], len(result["errors"]), len(result["warnings"]),
+    )
+    return result
 
 
 @router.get("/{recipe_id}/filter-values")
 def get_dashboard_filter_values(recipe_id: int, db: Session = Depends(get_db)):
-    """Return distinct values for each dimension and filter column — used to populate FilterBar dropdowns."""
-    recipe, config, staging = _get_recipe_and_staging(recipe_id, db)
-    cols = list(set(config.get("dimensions", []) + config.get("filters", [])))
+    """Return distinct values for each filter column — used to populate FilterBar dropdowns."""
+    recipe, config, staging, all_table_names = _get_recipe_and_staging(recipe_id, db)
+
+    # Only show columns explicitly listed as filters; fall back to dimensions if none set.
+    filter_cols = config.get("filters") or []
+    candidate_cols = filter_cols if filter_cols else config.get("dimensions", [])
+    candidate_cols = list(dict.fromkeys(candidate_cols))  # deduplicate, preserve order
+
+    # Exclude entity keys, emails, and text blobs (high-cardinality / PII) from dropdowns.
+    if staging.profile_data:
+        col_meta = {c["name"]: c for c in staging.profile_data.get("columns", [])}
+        filtered = [
+            c for c in candidate_cols
+            if col_meta.get(c, {}).get("semantic_tag") not in ("entity_key", "time_key", "text", "ignore")
+        ]
+        candidate_cols = filtered if filtered else candidate_cols
+
     try:
-        options = get_filter_options(staging.table_name, cols)
+        options = get_filter_options(all_table_names, candidate_cols)
     except Exception as e:
         raise HTTPException(500, f"Failed to load filter values: {e}")
     return options
 
 
 @router.get("/{recipe_id}/data")
-def get_dashboard_data(recipe_id: int, request: Request, db: Session = Depends(get_db)):
-    recipe, config, staging = _get_recipe_and_staging(recipe_id, db)
+def get_dashboard_data(
+    recipe_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    granularity: str = Query(default=None, description="Override recipe granularity: daily | weekly | monthly"),
+):
+    recipe, config, staging, all_table_names = _get_recipe_and_staging(recipe_id, db)
 
-    # Extract active filters from query params (exclude the recipe_id path param)
-    reserved = {"recipe_id"}
+    # Extract active filters from query params (exclude reserved params)
+    reserved = {"recipe_id", "granularity"}
     active_filters = {
         k: v for k, v in request.query_params.items()
         if k not in reserved and v
     }
 
+    t0 = time.perf_counter()
     try:
-        result = compute_dashboard(config, staging.table_name, filters=active_filters or None)
+        result = compute_dashboard(
+            config, all_table_names,
+            filters=active_filters or None,
+            granularity_override=granularity,
+        )
     except Exception as e:
+        logger.error("COMPUTE_FAIL recipe_id=%d error=%r", recipe_id, str(e))
         raise HTTPException(500, f"Computation failed: {e}")
+    logger.info(
+        "DASHBOARD_COMPUTE recipe_id=%d kpis=%d blank=%d filters=%s duration=%.2fs",
+        recipe_id,
+        len(result.get("kpi_summaries", [])),
+        sum(1 for k in result.get("kpi_summaries", []) if k.get("value") is None),
+        list(active_filters.keys()) if active_filters else [],
+        time.perf_counter() - t0,
+    )
+    effective_granularity = granularity or config.get("granularity", "monthly")
     return {
         "recipe_id": recipe_id,
-        "config": config,
+        "config": {**config, "granularity": effective_granularity},
         "active_filters": active_filters,
+        "active_granularity": effective_granularity,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         **result,
     }
@@ -68,11 +153,13 @@ def export_excel(recipe_id: int, db: Session = Depends(get_db)):
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
 
-    recipe, config, staging = _get_recipe_and_staging(recipe_id, db)
+    recipe, config, staging, all_table_names = _get_recipe_and_staging(recipe_id, db)
     try:
-        result = compute_dashboard(config, staging.table_name)
+        result = compute_dashboard(config, all_table_names)
     except Exception as e:
+        logger.error("EXPORT_FAIL recipe_id=%d format=excel error=%r", recipe_id, str(e))
         raise HTTPException(500, f"Computation failed: {e}")
+    logger.info("DASHBOARD_EXPORT recipe_id=%d format=excel kpis=%d", recipe_id, len(result.get("kpi_summaries", [])))
 
     wb = openpyxl.Workbook()
 
@@ -147,11 +234,13 @@ def export_excel(recipe_id: int, db: Session = Depends(get_db)):
 def export_pptx(recipe_id: int, db: Session = Depends(get_db)):
     from exporters.pptx_exporter import generate_pptx
 
-    recipe, config, staging = _get_recipe_and_staging(recipe_id, db)
+    recipe, config, staging, all_table_names = _get_recipe_and_staging(recipe_id, db)
     try:
-        result = compute_dashboard(config, staging.table_name)
+        result = compute_dashboard(config, all_table_names)
     except Exception as e:
+        logger.error("EXPORT_FAIL recipe_id=%d format=pptx error=%r", recipe_id, str(e))
         raise HTTPException(500, f"Computation failed: {e}")
+    logger.info("DASHBOARD_EXPORT recipe_id=%d format=pptx kpis=%d", recipe_id, len(result.get("kpi_summaries", [])))
 
     dashboard_data = {
         "template_type": config.get("granularity", ""),
@@ -184,3 +273,87 @@ def export_pptx(recipe_id: int, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f"attachment; filename=dashboard_recipe_{recipe_id}.pptx"},
     )
+
+
+# ── Formula validation ───────────────────────────────────────────────────────
+
+@router.post("/{recipe_id}/validate-formula")
+def validate_formula(recipe_id: int, body: dict, db: Session = Depends(get_db)):
+    """
+    Test-compute a single KPI formula against the recipe's staging data.
+
+    Returns:
+      { valid: bool, preview_value: float|null, error: str|null }
+
+    Used by the recipe editor to give per-formula feedback before approval.
+    """
+    formula = (body.get("formula") or "").strip()
+    if not formula:
+        raise HTTPException(400, "formula is required")
+
+    recipe, config, _staging, all_table_names = _get_recipe_and_staging(recipe_id, db)
+
+    try:
+        from services.compute import (
+            _load_staging_df,
+            _eval_formula,
+            _formula_agg,
+        )
+        import pandas as pd
+
+        df = _load_staging_df(all_table_names)
+        if df.empty:
+            return {"valid": False, "preview_value": None,
+                    "error": "Staging table is empty — re-upload the file."}
+
+        series = _eval_formula(df, formula)
+        if series.empty or series.isna().all():
+            return {"valid": False, "preview_value": None,
+                    "error": "Formula references unknown or non-numeric columns."}
+
+        agg = _formula_agg(formula)
+        raw = series.mean() if agg in ("mean", "ratio") else series.sum()
+
+        if pd.isna(raw):
+            return {"valid": False, "preview_value": None,
+                    "error": "Formula produces no valid values (all NaN)."}
+
+        return {"valid": True, "preview_value": round(float(raw), 4), "error": None}
+    except Exception as exc:
+        logger.warning("VALIDATE_FORMULA recipe_id=%d formula=%r error=%r",
+                       recipe_id, formula, str(exc))
+        return {"valid": False, "preview_value": None, "error": str(exc)}
+
+
+# ── Recipe config patch ───────────────────────────────────────────────────────
+
+_PATCHABLE_FIELDS = {"granularity", "date_column", "dimensions", "filters", "kpis", "column_mappings"}
+
+
+@router.patch("/{recipe_id}/config")
+def patch_recipe_config(recipe_id: int, body: dict, db: Session = Depends(get_db)):
+    """Update mutable recipe config fields without changing approval status.
+
+    Only granularity, date_column, dimensions, filters, kpis, and column_mappings
+    are accepted — structural fields (upload_id, dataset_id) are immutable.
+    """
+    from models.report_recipe import ReportRecipe
+
+    recipe = db.query(ReportRecipe).filter(ReportRecipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(404, "Recipe not found.")
+
+    config = dict(recipe.config)
+    updated_fields = []
+    for field in _PATCHABLE_FIELDS:
+        if field in body:
+            config[field] = body[field]
+            updated_fields.append(field)
+
+    if not updated_fields:
+        raise HTTPException(400, f"No patchable fields found. Allowed: {sorted(_PATCHABLE_FIELDS)}")
+
+    recipe.config = config
+    db.commit()
+    logger.info("RECIPE_CONFIG_PATCHED recipe_id=%d fields=%s", recipe_id, updated_fields)
+    return {"status": "ok", "updated": updated_fields, "config": config}

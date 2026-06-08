@@ -1,4 +1,5 @@
 import json
+import re
 
 from schemas.interview import InterviewResult, KpiSpec, STEP_LABELS
 from schemas.upload import ProfilingResult
@@ -37,14 +38,15 @@ Your job is to ask the user up to 5 short, targeted questions to understand:
 1. What the data represents (already asked as Q1)
 2. Which columns are dates / time periods
 3. Which columns they want to measure or track
-4. Which columns they use for grouping or filtering
+4. Which columns they use for grouping or filtering (dimensions — e.g. agent name, team, queue, region)
 5. Time granularity (daily / weekly / monthly)
 
 Rules:
 - Ask ONE short question at a time, tailored to the columns you see.
 - Reference specific column names from the file to make questions concrete.
 - If a column name strongly implies the answer (e.g. 'call_date'), pre-suggest it.
-- When all answers are collected, output [INTERVIEW_COMPLETE] at the end of your reply."""
+- You MUST ask about grouping/filtering columns (question 4) before outputting [INTERVIEW_COMPLETE].
+- Only output [INTERVIEW_COMPLETE] once you have confirmed: date column, at least one metric, and at least one grouping column."""
 
 
 def _flow1_extract(history: list[dict], profiles: list[dict]) -> dict:
@@ -102,29 +104,87 @@ def run_flow1(
 
     if done:
         extracted = _flow1_extract(updated, profiles)
+        # Guard: ensure required fields were collected before closing the interview
+        missing: list[str] = []
+        if not extracted.get("date_column"):
+            missing.append("which column contains the date or time period")
+        if not extracted.get("dimensions"):
+            missing.append("which columns to use for grouping or filtering (e.g. agent name, team, queue)")
+        if missing:
+            follow_up = "Before we wrap up — could you confirm " + " and ".join(missing) + "?"
+            updated.append({"role": "assistant", "content": follow_up})
+            return follow_up, step, False, None
         return display, step, True, extracted
 
     return display, step, False, None
 
 
+_MAX_FILTER_UNIQUES = 50  # columns with more distinct values are too wide for a useful dropdown
+
+# Tokens that identify non-filterable columns (PII, identifiers, contact fields).
+# Checked against each underscore/hyphen-separated token in the column name so that
+# snake_case names like "affirm_email" or "agent_id" are caught reliably.
+# Note: \b word-boundary does NOT work here because "_" is \w in Python regex,
+# so "affirm_email" has no boundary before "email".
+_BAD_FILTER_TOKENS: frozenset[str] = frozenset({
+    "email", "mail", "phone", "mobile", "fax", "address",
+    "url", "link", "password", "token", "hash",
+    "id", "key", "code", "num", "number", "ref",
+    "uuid", "guid",
+})
+
+
+def _is_bad_filter_col(col_name: str) -> bool:
+    """Return True if any token in the column name matches a PII/identifier pattern."""
+    parts = re.split(r"[_\-\s]+", col_name.lower())
+    return bool(_BAD_FILTER_TOKENS.intersection(parts))
+
+
 def default_interview_result(profiles: list[dict]) -> dict:
-    """Return a minimal InterviewResult using heuristic column detection (skip path)."""
+    """
+    Return a minimal InterviewResult from schema-mapping data (skip-interview path).
+
+    Filter selection — ONLY from explicit schema markings (is_filter=True).
+    No heuristic fallback: if the user marked no filters, the result has no filters.
+    This respects user intent; filters can always be added later in the recipe editor.
+
+    Note: _is_bad_filter_col is NOT applied to user-selected filters because the user
+    explicitly chose those columns — second-guessing them causes silent data loss
+    (e.g. "agent_code" rejected because "code" is a bad token).
+    Heuristic filter detection is retained for fallback but only applied when the user
+    has not explicitly marked any filters at all AND the schema has not been saved.
+    """
     date_col = None
     dimensions: list[str] = []
+    user_filters: list[str] = []   # explicitly marked is_filter=True in Schema Mapping
+
     for p in profiles:
         for c in p.get("columns", []):
-            if c.get("detected_type") == "date" and not date_col:
-                date_col = c["name"]
-            elif c.get("suggested_role") == "dimension":
-                dimensions.append(c["name"])
+            col_name = c["name"]
+            detected_type = c.get("detected_type", "")
+            suggested_role = c.get("suggested_role", "")
+            semantic_tag = c.get("semantic_tag", "")
+
+            if detected_type == "date" and not date_col:
+                date_col = col_name
+                continue
+
+            if suggested_role == "dimension" and semantic_tag not in ("entity_key", "time_key", "financial_metric"):
+                dimensions.append(col_name)
+
+            # Respect all user-explicitly-selected filters without any name-based rejection.
+            # The bad-token check was silently dropping valid business filters like
+            # "agent_code", "supervisor_id", "activity_type_code".
+            if c.get("is_filter"):
+                user_filters.append(col_name)
 
     return {
         "domain": None,
         "date_column": date_col,
         "kpis": [],
-        "dimensions": dimensions[:3],
+        "dimensions": dimensions[:5],
         "granularity": "monthly",
-        "filters": dimensions[:2],
+        "filters": user_filters,   # exact set the user chose; empty = no filters
     }
 
 

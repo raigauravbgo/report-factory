@@ -10,6 +10,7 @@ interface ColumnOverrideState {
   role?: ColumnRole;
   semanticTag?: SemanticTag;
   inGrain?: boolean;
+  inFilter?: boolean;
 }
 
 interface FileTab {
@@ -30,6 +31,7 @@ export default function SchemaPage() {
   const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [navigating, setNavigating] = useState(false);
 
   // Load all upload profiles from sessionStorage (set by upload page)
   useEffect(() => {
@@ -95,12 +97,39 @@ export default function SchemaPage() {
           suggested_role: tab.overrides[c.name]?.role,
           semantic_tag: tab.overrides[c.name]?.semanticTag,
           in_grain: tab.overrides[c.name]?.inGrain,
+          in_filter: tab.overrides[c.name]?.inFilter,
         }));
       await api.saveSchemaOverrides(tab.uploadId, { column_overrides });
       setTabs((prev) => prev.map((t, i) => (i === tabIndex ? { ...t, saving: false, saved: true } : t)));
     } catch {
       setTabs((prev) => prev.map((t, i) => (i === tabIndex ? { ...t, saving: false } : t)));
     }
+  }
+
+  async function handleNavigate(to: string) {
+    setNavigating(true);
+    try {
+      // Auto-save all tabs that have unsaved overrides so is_filter reaches the backend
+      const pending = tabs
+        .map((t, i) => ({ tab: t, index: i }))
+        .filter(({ tab }) => tab.profile && Object.keys(tab.overrides).length > 0);
+      await Promise.all(pending.map(({ index }) => handleSaveTab(index)));
+    } catch {
+      // ignore save errors — navigate anyway
+    }
+    // When skipping the interview, call the skip endpoint so the heuristic result
+    // (date column, dimensions, filters from schema) is stored in sessionStorage.
+    // This ensures KPI suggestions receive domain context and generateDashboard
+    // has the correct interview_result even without going through the interview page.
+    if (to.includes("/kpis")) {
+      try {
+        const skipResult = await api.skipInterview(Number(datasetId));
+        sessionStorage.setItem(`dataset_${datasetId}_interview`, JSON.stringify(skipResult));
+      } catch {
+        // non-fatal: session_generator.py heuristic fallback covers this
+      }
+    }
+    router.push(to);
   }
 
   const activeSheet = tabs[activeTab]?.profile?.active_sheet ?? "";
@@ -241,16 +270,18 @@ export default function SchemaPage() {
         {/* CTA row */}
         <div className="flex items-center justify-between border-t border-gray-100 pt-6">
           <button
-            onClick={() => router.push(`/session/${datasetId}/kpis`)}
-            className="text-sm text-gray-400 hover:text-gray-600 underline underline-offset-2"
+            onClick={() => handleNavigate(`/session/${datasetId}/kpis`)}
+            disabled={navigating}
+            className="text-sm text-gray-400 hover:text-gray-600 underline underline-offset-2 disabled:opacity-50"
           >
-            Skip Interview → Go to KPI Selection
+            {navigating ? "Saving…" : "Skip Interview → Go to KPI Selection"}
           </button>
           <button
-            onClick={() => router.push(`/session/${datasetId}/interview`)}
-            className="px-5 py-2 rounded-lg text-sm font-medium bg-[#1B2340] text-white hover:bg-[#243060]"
+            onClick={() => handleNavigate(`/session/${datasetId}/interview`)}
+            disabled={navigating}
+            className="px-5 py-2 rounded-lg text-sm font-medium bg-[#1B2340] text-white hover:bg-[#243060] disabled:opacity-50"
           >
-            Continue to Interview →
+            {navigating ? "Saving…" : "Continue to Interview →"}
           </button>
         </div>
       </div>

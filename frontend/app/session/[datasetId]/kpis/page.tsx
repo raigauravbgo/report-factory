@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { logEvent } from "@/lib/logger";
 import type { KpiSuggestion } from "@/lib/types";
 
 const DOMAIN_COLORS: Record<string, string> = {
@@ -31,6 +32,7 @@ export default function KpisPage() {
   const [customName, setCustomName] = useState("");
   const [customFormula, setCustomFormula] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const dragItem = useRef<number | null>(null);
   const dragOver = useRef<number | null>(null);
@@ -45,7 +47,7 @@ export default function KpisPage() {
       return raw ? JSON.parse(raw) : {};
     })();
 
-    api.getKpiSuggestions(Number(datasetId), uploadIds).then((res) => {
+    api.getKpiSuggestions(Number(datasetId), uploadIds, interviewAnswers).then((res) => {
       setSuggestions(res);
       // Pre-select high-confidence items
       setSelected(res.filter((k) => k.confidence >= 0.75).slice(0, 8));
@@ -64,8 +66,15 @@ export default function KpisPage() {
     return true;
   });
 
-  const addKpi = (kpi: KpiSuggestion) => setSelected((p) => [...p, kpi]);
-  const removeKpi = (id: string) => setSelected((p) => p.filter((k) => k.kpi_id !== id));
+  const addKpi = (kpi: KpiSuggestion) => {
+    setSelected((p) => [...p, kpi]);
+    logEvent("kpi_selected", "kpis", { kpi_id: kpi.kpi_id, display_name: kpi.display_name, confidence: kpi.confidence, domain: kpi.domain }, { datasetId: Number(datasetId) });
+  };
+  const removeKpi = (id: string) => {
+    const kpi = selected.find((k) => k.kpi_id === id);
+    setSelected((p) => p.filter((k) => k.kpi_id !== id));
+    if (kpi) logEvent("kpi_deselected", "kpis", { kpi_id: id, display_name: kpi.display_name }, { datasetId: Number(datasetId) });
+  };
   const selectAll = () => setSelected([...suggestions]);
   const deselectAll = () => setSelected([]);
 
@@ -77,10 +86,11 @@ export default function KpisPage() {
       formula: customFormula.trim(),
       confidence: 1,
       matched_columns: {},
-      source: "interview",
+      source: "interview" as const,
       domain: "custom",
     };
     setSelected((p) => [...p, kpi]);
+    logEvent("custom_kpi_created", "kpis", { name: kpi.display_name, formula: kpi.formula }, { datasetId: Number(datasetId) });
     setCustomName("");
     setCustomFormula("");
   };
@@ -89,10 +99,13 @@ export default function KpisPage() {
   const onDragEnter = (i: number) => { dragOver.current = i; };
   const onDrop = () => {
     if (dragItem.current === null || dragOver.current === null) return;
+    const from = dragItem.current;
+    const to = dragOver.current;
     const reordered = [...selected];
-    const [moved] = reordered.splice(dragItem.current, 1);
-    reordered.splice(dragOver.current, 0, moved);
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
     setSelected(reordered);
+    logEvent("kpi_reordered", "kpis", { from_index: from, to_index: to, kpi_id: moved.kpi_id }, { datasetId: Number(datasetId) });
     dragItem.current = null;
     dragOver.current = null;
   };
@@ -100,18 +113,29 @@ export default function KpisPage() {
   async function handleGenerate() {
     if (selected.length === 0) return;
     setGenerating(true);
+    setGenerateError(null);
     try {
       const confirmedRel = (() => {
         const raw = sessionStorage.getItem(`dataset_${datasetId}_relationships`);
         return raw ? JSON.parse(raw) : [];
       })();
+      const interviewResult = (() => {
+        const raw = sessionStorage.getItem(`dataset_${datasetId}_interview`);
+        return raw ? JSON.parse(raw) : {};
+      })();
+      logEvent("generate_dashboard_clicked", "kpis", {
+        kpi_count: selected.length,
+        kpi_ids: selected.map((k) => k.kpi_id),
+      }, { datasetId: Number(datasetId) });
       const res = await api.generateDashboard(
         Number(datasetId),
-        selected.map((k) => k.kpi_id),
+        selected,
         confirmedRel,
+        interviewResult,
       );
       router.push(`/dashboard/${res.recipe_id}`);
     } catch (e) {
+      setGenerateError(String(e));
       setGenerating(false);
     }
   }
@@ -141,7 +165,10 @@ export default function KpisPage() {
                 {domains.map((d) => (
                   <button
                     key={d}
-                    onClick={() => setDomainFilter(d)}
+                    onClick={() => {
+                      setDomainFilter(d);
+                      if (d !== "all") logEvent("domain_filter_applied", "kpis", { domain: d }, { datasetId: Number(datasetId) });
+                    }}
                     className={`px-3 py-1 rounded-full text-xs font-medium border capitalize transition-colors
                       ${domainFilter === d ? "bg-[#1B2340] text-white border-[#1B2340]" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}
                   >
@@ -286,7 +313,12 @@ export default function KpisPage() {
             </div>
 
             {/* Generate button */}
-            <div className="border-t border-gray-100 p-4 bg-white">
+            <div className="border-t border-gray-100 p-4 bg-white space-y-2">
+              {generateError && (
+                <p className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 break-words">
+                  {generateError}
+                </p>
+              )}
               <button
                 onClick={handleGenerate}
                 disabled={selected.length === 0 || generating}
