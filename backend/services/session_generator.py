@@ -71,7 +71,7 @@ def generate_from_session(
     cols: set[str] = set()
     date_col = interview_result.get("date_column") or ""
     dimensions = list(interview_result.get("dimensions") or [])
-    granularity = interview_result.get("granularity") or "monthly"
+    granularity = interview_result.get("granularity") or "weekly"
     domain = interview_result.get("domain") or ""
 
     # ── Step 3: Per-field heuristic fallback for date/dims only ────────────
@@ -90,8 +90,8 @@ def generate_from_session(
                 date_col = _hr.get("date_column") or ""
             if not dimensions:
                 dimensions = list(_hr.get("dimensions") or [])
-            if not granularity or granularity == "monthly":
-                granularity = _hr.get("granularity") or "monthly"
+            if not granularity or granularity == "weekly":
+                granularity = _hr.get("granularity") or "weekly"
             if not domain:
                 domain = _hr.get("domain") or ""
 

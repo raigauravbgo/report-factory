@@ -157,7 +157,7 @@ def get_dashboard_data(
         list(active_filters.keys()) if active_filters else [],
         time.perf_counter() - t0,
     )
-    effective_granularity = granularity or config.get("granularity", "monthly")
+    effective_granularity = granularity or config.get("granularity", "weekly")
     return {
         "recipe_id": recipe_id,
         "config": {**config, "granularity": effective_granularity},

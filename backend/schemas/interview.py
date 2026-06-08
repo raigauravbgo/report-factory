@@ -59,7 +59,7 @@ class RecipeConfig(BaseModel):
     dataset_id: int
     column_mappings: dict[str, str] = {}
     date_column: str | None = None   # L7: Optional — may be absent in partial configs
-    granularity: str = "monthly"
+    granularity: str = "weekly"
     dimensions: list[str] = []
     filters: list[str] = []
     kpis: list[KpiSpec] = []

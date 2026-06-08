@@ -157,6 +157,17 @@ def _excel_serial_to_date(v: object) -> str:
     return str(v)
 
 
+_TIME_TOKENS: frozenset[str] = frozenset({
+    "month", "week", "year", "quarter", "day", "hour", "period", "fiscal", "fy",
+})
+
+
+def _is_time_derived_col(col: str) -> bool:
+    """Return True if the column looks like a date-part (month, week, year, etc.)."""
+    parts = re.split(r"[_\-\s]+", col.lower())
+    return bool(_TIME_TOKENS.intersection(parts))
+
+
 def _resample_rule(granularity: str) -> str:
     # "MS" (month-start) instead of "ME"/"M" avoids end-of-month bin edge cases
     # and works correctly when data spans only part of a single month.
@@ -443,7 +454,7 @@ def validate_dashboard_config(
     }
 
     date_col = recipe_config.get("date_column")
-    granularity = (recipe_config.get("granularity") or "monthly").lower()
+    granularity = (recipe_config.get("granularity") or "weekly").lower()
 
     # ── Date column ──────────────────────────────────────────────────────
     if date_col:
@@ -609,7 +620,7 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
     df_full = df.copy()
 
     date_col = recipe_config.get("date_column")
-    granularity = (granularity_override or recipe_config.get("granularity", "monthly")).lower()
+    granularity = (granularity_override or recipe_config.get("granularity", "weekly")).lower()
     kpis = recipe_config.get("kpis", [])
     dimensions = recipe_config.get("dimensions", [])
 
@@ -637,6 +648,24 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
     kpi_summaries: list[dict] = []
     time_series: list[dict] = []
     breakdown: list[dict] = []
+
+    # Pre-compute once: df_reset and dimension candidates sorted by cardinality.
+    # Scans ALL dataframe columns (not just recipe dimensions) so that columns like
+    # "supervisor" are discovered even when not listed as recipe dimensions.
+    # Recipe dimensions are ranked first; all others follow, sorted by cardinality.
+    from services.ai_interview import _is_bad_filter_col as _bad_col  # inline to avoid circular import
+    df_reset = df.reset_index() if date_col else df
+    _breakdown_candidates = sorted(
+        [
+            c for c in df_reset.columns
+            if not _bad_col(c)
+            and not _is_time_derived_col(c)
+            and not pd.api.types.is_numeric_dtype(df_reset[c])
+            and 2 <= df_reset[c].nunique() <= 50
+            and c != date_col
+        ],
+        key=lambda d: df_reset[d].nunique(),
+    )
 
     for kpi in kpis:
         name = kpi.get("name", "")
@@ -714,10 +743,11 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
                 ],
             })
 
-        # Breakdown by best available dimension (lowest cardinality, not PII)
-        df_reset = df.reset_index() if date_col else df
-        dim = _pick_breakdown_dim(dimensions, df_reset)
-        if dim and dim in df_reset.columns:
+        # Breakdown: try each candidate dimension in cardinality order, use the first
+        # that yields ≥1 non-null group for this KPI's formula.
+        grouped = pd.Series(dtype=float)
+        chosen_dim: str | None = None
+        for _dim in _breakdown_candidates:
             if is_ros:
                 _fp = [p.strip() for p in formula.split("/", 1)]
                 def _ros_group(g, fp=_fp):
@@ -728,18 +758,22 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
                     d_sum = d.sum()
                     return float(n.sum() / d_sum) if d_sum != 0 else pd.NA
                 # include_groups was removed in pandas 2.3 (groups excluded by default)
-                grouped = df_reset.groupby(dim).apply(_ros_group).dropna()
+                grouped = df_reset.groupby(_dim).apply(_ros_group).dropna()
             else:
                 # L5: bind loop variables in default args to capture current iteration values
-                grouped = df_reset.groupby(dim).apply(
+                grouped = df_reset.groupby(_dim).apply(
                     lambda g, _f=formula, _a=agg: _eval_formula(g, _f).mean()
                     if _a in ("mean", "ratio")
                     else _eval_formula(g, _f).sum(),
                 ).dropna()
+            if not grouped.empty:
+                chosen_dim = _dim
+                break
 
+        if chosen_dim is not None and not grouped.empty:
             breakdown.append({
                 "kpi": name,
-                "dimension": dim,
+                "dimension": chosen_dim,
                 "data": [
                     {"label": str(k), "value": round(float(v), 4)}
                     for k, v in grouped.items()

@@ -185,7 +185,7 @@ def default_interview_result(profiles: list[dict]) -> dict:
         "date_column": date_col,
         "kpis": [],
         "dimensions": dimensions[:5],
-        "granularity": "monthly",
+        "granularity": "weekly",
         "filters": user_filters,   # exact set the user chose; empty = no filters
     }
 

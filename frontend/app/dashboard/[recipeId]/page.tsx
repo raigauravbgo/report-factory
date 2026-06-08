@@ -453,7 +453,11 @@ export default function DashboardPage() {
         {breakdown.length > 0 && (
           <section className="space-y-3">
             <SectionHeader
-              title={`Breakdown by ${breakdown[0]?.dimension?.replace(/_/g, " ")}`}
+              title={
+                breakdown.every((b) => b.dimension === breakdown[0]?.dimension)
+                  ? `Breakdown by ${breakdown[0]?.dimension?.replace(/_/g, " ")}`
+                  : "Breakdown Analysis"
+              }
               subtitle="Comparison across dimension values"
             />
             <div className="grid gap-5 lg:grid-cols-2">
