@@ -38,13 +38,16 @@ def _get_recipe_and_staging(recipe_id: int, db: Session):
 
     # Collect ALL staging tables for the dataset to support multi-file compute.
     # If dataset_id is present use it; otherwise fall back to single upload.
+    # H4: Single JOIN query replaces N+1 (one StagingTable query per upload)
     all_table_names: list[str] = []
     if dataset_id:
-        uploads = db.query(Upload).filter(Upload.dataset_id == dataset_id).all()
-        for u in uploads:
-            st = db.query(StagingTable).filter(StagingTable.upload_id == u.id).first()
-            if st:
-                all_table_names.append(st.table_name)
+        staging_rows = (
+            db.query(StagingTable)
+            .join(Upload, StagingTable.upload_id == Upload.id)
+            .filter(Upload.dataset_id == dataset_id)
+            .all()
+        )
+        all_table_names = [st.table_name for st in staging_rows]
 
     if not all_table_names and primary:
         all_table_names = [primary.table_name]
@@ -88,11 +91,28 @@ def get_dashboard_filter_values(recipe_id: int, db: Session = Depends(get_db)):
     candidate_cols = list(dict.fromkeys(candidate_cols))  # deduplicate, preserve order
 
     # Exclude entity keys, emails, and text blobs (high-cardinality / PII) from dropdowns.
-    if staging.profile_data:
-        col_meta = {c["name"]: c for c in staging.profile_data.get("columns", [])}
+    # Bug fix: build col_meta from ALL files in the dataset, not just the primary staging table.
+    # Columns from files 2+ would otherwise bypass semantic-tag filtering.
+    dataset_id = config.get("dataset_id")
+    all_col_meta: dict = {}
+    if dataset_id:
+        all_stagings = (
+            db.query(StagingTable)
+            .join(Upload, StagingTable.upload_id == Upload.id)
+            .filter(Upload.dataset_id == dataset_id)
+            .all()
+        )
+        for _st in all_stagings:
+            for _col in (_st.profile_data or {}).get("columns", []):
+                all_col_meta[_col["name"]] = _col  # last file wins on name collision
+    elif staging.profile_data:
+        # fallback for legacy single-file recipes without dataset_id
+        for _col in staging.profile_data.get("columns", []):
+            all_col_meta[_col["name"]] = _col
+    if all_col_meta:
         filtered = [
             c for c in candidate_cols
-            if col_meta.get(c, {}).get("semantic_tag") not in ("entity_key", "time_key", "text", "ignore")
+            if all_col_meta.get(c, {}).get("semantic_tag") not in ("entity_key", "time_key", "text", "ignore")
         ]
         candidate_cols = filtered if filtered else candidate_cols
 

@@ -100,7 +100,9 @@ def run_flow1(
     updated.append({"role": "assistant", "content": ai_response})
 
     done = "[INTERVIEW_COMPLETE]" in ai_response
-    step = min(len([m for m in updated if m["role"] == "assistant"]) + 1, 6)
+    # H18: Base step on user-turn count, not assistant message count — prevents
+    # the counter jumping when the AI sends follow-up clarifications without a user reply.
+    step = min(len([m for m in updated if m["role"] == "user"]) + 1, 6)
 
     if done:
         extracted = _flow1_extract(updated, profiles)
@@ -269,18 +271,24 @@ def _step(extracted: dict) -> int:
 
 
 def _complete(extracted: dict) -> bool:
+    # H17: filters must be a list (not None, not [None]). An empty list [] is valid
+    # (user explicitly said no filters). [None] means AI returned null in the array
+    # which indicates the AI hasn't confirmed filters yet.
+    filters = extracted.get("filters")
+    filters_confirmed = isinstance(filters, list) and filters != [None]
     return (
         bool(extracted.get("date_column"))
         and bool(extracted.get("kpis"))
         and bool(extracted.get("dimensions"))
         and bool(extracted.get("granularity"))
-        and extracted.get("filters") is not None
-        and extracted.get("filters") != [None]
+        and filters_confirmed
     )
 
 
 def _to_result(extracted: dict) -> InterviewResult:
+    # H1: Preserve domain field collected in Q1
     return InterviewResult(
+        domain=extracted.get("domain"),
         date_column=extracted["date_column"],
         kpis=[KpiSpec(**k) for k in (extracted.get("kpis") or [])],
         dimensions=extracted.get("dimensions") or [],

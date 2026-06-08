@@ -13,11 +13,16 @@ function useUploadIds(datasetId: string): { uploadIds: number[]; filenames: stri
     ? sessionStorage.getItem(`dataset_${datasetId}_uploads`)
     : null;
   if (!stored) return { uploadIds: [], filenames: [] };
-  const parsed: { uploadId: number; filename: string }[] = JSON.parse(stored);
-  return {
-    uploadIds: parsed.map((p) => p.uploadId),
-    filenames: parsed.map((p) => p.filename),
-  };
+  // C3: Guard against corrupted sessionStorage
+  try {
+    const parsed: { uploadId: number; filename: string }[] = JSON.parse(stored);
+    return {
+      uploadIds: parsed.map((p) => p.uploadId),
+      filenames: parsed.map((p) => p.filename),
+    };
+  } catch {
+    return { uploadIds: [], filenames: [] };
+  }
 }
 
 export default function InterviewPage() {
@@ -32,15 +37,22 @@ export default function InterviewPage() {
   const [completed, setCompleted] = useState(false);
   const [result, setResult] = useState<InterviewResult | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // H16: Prevent effect from re-firing on page re-visit (React StrictMode runs effects twice)
+  const initializedRef = useRef(false);
 
   // Start: fire first turn to get Q1
   useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     sendTurn("", []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // M9: Check ref is still mounted before scrolling
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   }, [history]);
 
   async function sendTurn(userMessage: string, currentHistory: ChatMessage[]) {
@@ -58,7 +70,8 @@ export default function InterviewPage() {
         { role: "assistant" as const, content: res.message },
       ];
       setHistory(newHistory);
-      setStep(res.step_index ?? step + 1);
+      // H12: Use functional update to avoid stale closure on fallback increment
+      setStep((prev) => res.step_index ?? prev + 1);
       if (res.completed && res.interview_result) {
         setCompleted(true);
         setResult(res.interview_result);

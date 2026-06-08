@@ -79,6 +79,14 @@ export default function ColumnTable({ columns, overrides, onOverride, grainSugge
                 <td className="px-4 py-3 font-mono font-medium text-gray-900 whitespace-nowrap">
                   {col.name}
                   {isDirty && <span className="ml-1 text-xs text-amber-500">*</span>}
+                  {/* PK badge: entity_key columns that are grain candidates (≥95% unique) */}
+                  {tag === "entity_key" && inGrain && (
+                    <span className="ml-1.5 text-[9px] font-bold px-1 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wide">PK</span>
+                  )}
+                  {/* FK badge: entity_key columns that are NOT grain candidates (repeated values = references another table) */}
+                  {tag === "entity_key" && !inGrain && (
+                    <span className="ml-1.5 text-[9px] font-bold px-1 py-0.5 rounded bg-orange-100 text-orange-700 uppercase tracking-wide">FK</span>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`rounded px-2 py-0.5 text-xs font-medium ${TYPE_BADGE[col.detected_type]}`}>
@@ -120,6 +128,7 @@ export default function ColumnTable({ columns, overrides, onOverride, grainSugge
                         type="checkbox"
                         checked={inGrain}
                         onChange={(e) => onOverride(col.name, { inGrain: e.target.checked })}
+                        aria-label={`Mark ${col.name} as grain column`}
                         className="h-3 w-3 rounded accent-teal-600"
                       />
                       {isAiGrain && !ov.inGrain && (
@@ -135,6 +144,7 @@ export default function ColumnTable({ columns, overrides, onOverride, grainSugge
                       checked={inFilter}
                       onChange={(e) => onOverride(col.name, { inFilter: e.target.checked })}
                       title="Mark as dashboard filter"
+                      aria-label={`Mark ${col.name} as dashboard filter`}
                       className="h-3.5 w-3.5 rounded accent-[#00B5AD]"
                     />
                   </div>

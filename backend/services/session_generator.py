@@ -29,6 +29,19 @@ def generate_from_session(
 
     uploads = db.query(Upload).filter(Upload.dataset_id == dataset_id).all()
     upload_id = uploads[0].id if uploads else 0
+    # H19: Use actual client_id from upload — "default" breaks schema memory keyed on client_id
+    client_id = uploads[0].client_id if uploads else "default"
+    # Fix 3: persist all upload IDs so the dashboard never silently drops to first-file mode
+    all_upload_ids = [u.id for u in uploads]
+
+    # Fix 2a: build filename → staging table name map.
+    # The compute engine needs this to resolve `file_a`/`file_b` names from
+    # confirmed_relationships (which use filenames) back to physical table names.
+    upload_table_map: dict[str, str] = {}
+    for _u in uploads:
+        _umap_st = db.query(StagingTable).filter(StagingTable.upload_id == _u.id).first()
+        if _umap_st:
+            upload_table_map[_u.filename] = _umap_st.table_name
 
     # Use the formula already resolved by kpi_suggester (actual column names), falling back to display_name
     resolved_kpis = [
@@ -110,7 +123,9 @@ def generate_from_session(
     chart_layout = _build_chart_layout(sections, dimensions)
 
     config = {
-        "upload_id": upload_id,
+        "upload_id": upload_id,            # kept for backward compat (primary file)
+        "upload_ids": all_upload_ids,      # Fix 3: full list of all files in this session
+        "upload_table_map": upload_table_map,  # Fix 2a: filename → staging table name
         "dataset_id": dataset_id,
         "column_mappings": column_mappings,
         "date_column": date_col,
@@ -124,7 +139,7 @@ def generate_from_session(
     }
 
     recipe = ReportRecipe(
-        client_id="default",
+        client_id=client_id,
         dataset_id=dataset_id,
         config=config,
         version=1,

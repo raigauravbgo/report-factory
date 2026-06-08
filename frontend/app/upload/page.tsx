@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import UploadZone from "@/components/UploadZone";
 import { api } from "@/lib/api";
 import { logEvent } from "@/lib/logger";
@@ -38,6 +38,13 @@ export default function UploadPage() {
   const [uploadError, setUploadError] = useState("");
   const pollingRef = useRef<Record<number, ReturnType<typeof setInterval>>>({});
 
+  // C1: Clear all intervals on unmount to prevent memory leak
+  useEffect(() => {
+    return () => {
+      Object.values(pollingRef.current).forEach(clearInterval);
+    };
+  }, []);
+
   const handleFiles = useCallback(async (selected: File[]) => {
     setUploadError("");
     setUploading(true);
@@ -60,10 +67,11 @@ export default function UploadPage() {
 
     logEvent("upload_started", "upload", { file_count: selected.length }, { datasetId: batchRes.dataset_id });
     setDatasetId(batchRes.dataset_id);
+    // C2: Use actual status from API response instead of hardcoding "pending"
     const entries: FileEntry[] = batchRes.uploads.map((u) => ({
       uploadId: u.upload_id,
       filename: u.filename,
-      status: "pending",
+      status: (u.status ?? "pending") as UploadStatus,
     }));
     setFiles(entries);
     setUploading(false);
@@ -195,7 +203,12 @@ export default function UploadPage() {
             {files.length > 0 && (
               <div className="flex items-center justify-between pt-2">
                 <button
-                  onClick={() => { setFiles([]); setDatasetId(null); setUploadError(""); }}
+                  onClick={() => {
+                    // M1: Clear all active polling intervals before resetting state
+                    Object.values(pollingRef.current).forEach(clearInterval);
+                    pollingRef.current = {};
+                    setFiles([]); setDatasetId(null); setUploadError("");
+                  }}
                   className="text-sm text-gray-400 hover:text-gray-600"
                 >
                   Upload different files

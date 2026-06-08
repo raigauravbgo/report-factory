@@ -146,8 +146,9 @@ def _denominator_cols_from_formula(formula: str) -> list[str]:
     _, den_part = formula.split("/", 1)
     # Strip outer whitespace and parentheses
     den_clean = den_part.strip().strip("()")
-    # Split on + to handle compound denominators
-    parts = [p.strip() for p in re.split(r"\s*\+\s*", den_clean) if p.strip()]
+    # M7: Split on +, -, * to handle all compound denominator forms
+    # e.g. col_a / (col_b - col_c) or col_a / (col_b * col_c)
+    parts = [p.strip() for p in re.split(r"\s*[+\-*]\s*", den_clean) if p.strip()]
     return parts
 
 

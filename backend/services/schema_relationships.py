@@ -24,15 +24,19 @@ def infer(dataset_id: int, db: Session) -> list[RelationshipSuggestion]:
     Detect likely relationships between columns across all uploads in a dataset.
     Three signals: column name fuzzy match, value set overlap, cardinality match.
     """
-    uploads = db.query(Upload).filter(Upload.dataset_id == dataset_id).all()
-    if len(uploads) < 2:
+    # H5: Single JOIN query replaces N+1 (one StagingTable query per upload)
+    rows = (
+        db.query(StagingTable, Upload)
+        .join(Upload, StagingTable.upload_id == Upload.id)
+        .filter(Upload.dataset_id == dataset_id)
+        .all()
+    )
+    if len(rows) < 2:
         return []
 
-    # Load profile + staging data per upload
     file_profiles: list[_FileInfo] = []
-    for upload in uploads:
-        staging = db.query(StagingTable).filter(StagingTable.upload_id == upload.id).first()
-        if not staging or not staging.profile_data:
+    for staging, upload in rows:
+        if not staging.profile_data:
             continue
         file_profiles.append(_FileInfo(
             filename=upload.filename,

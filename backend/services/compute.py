@@ -2,6 +2,7 @@
 KPI computation engine.
 Loads staging data, evaluates KPI formulas, and returns chart-ready series.
 """
+import logging
 import re
 from typing import Any
 
@@ -10,15 +11,27 @@ from sqlalchemy.orm import Session
 
 from core.database import engine
 
+logger = logging.getLogger(__name__)
 
-def _load_staging_df(table_name: "str | list[str]") -> pd.DataFrame:
-    """Load one or more staging tables and concatenate them.
 
-    When multiple files are uploaded for the same dataset each file ends up in
-    its own staging table with a different schema.  Concatenating with
-    sort=False leaves columns not present in a given file as NaN — the
-    pd.to_numeric(errors="coerce") calls downstream then naturally limit each
-    KPI to the rows that actually carry the relevant columns.
+def _load_staging_df(
+    table_name: "str | list[str]",
+    confirmed_relationships: "list[dict] | None" = None,
+    upload_table_map: "dict[str, str] | None" = None,
+) -> pd.DataFrame:
+    """Load one or more staging tables.
+
+    When confirmed PK/FK relationships exist, JOIN the fact table to dimension
+    tables using those relationships.  Without relationships (or for same-grain
+    files), fall back to pd.concat so columns from all files are available.
+
+    Parameters
+    ----------
+    table_name             : one table name or list of names (multi-file datasets)
+    confirmed_relationships: from recipe_config["confirmed_relationships"]
+    upload_table_map       : from recipe_config["upload_table_map"] — maps
+                             filename → staging table name so relationship
+                             file_a/file_b names resolve to physical tables
     """
     names = [table_name] if isinstance(table_name, str) else list(table_name)
     with engine.connect() as conn:
@@ -27,7 +40,105 @@ def _load_staging_df(table_name: "str | list[str]") -> pd.DataFrame:
         return pd.DataFrame()
     if len(dfs) == 1:
         return dfs[0]
+
+    # Apply PK/FK-aware joins when the caller supplies relationship context.
+    if confirmed_relationships and upload_table_map:
+        return _apply_relationships(dfs, names, confirmed_relationships, upload_table_map)
+
+    # Default: raw concat — columns absent in one file become NaN for its rows.
     return pd.concat(dfs, ignore_index=True, sort=False)
+
+
+def _apply_relationships(
+    dfs: "list[pd.DataFrame]",
+    table_names: "list[str]",
+    confirmed_relationships: "list[dict]",
+    upload_table_map: "dict[str, str]",
+) -> pd.DataFrame:
+    """Join DataFrames using confirmed PK/FK relationships.
+
+    Strategy
+    --------
+    For each ``pk_fk`` relationship in *confirmed_relationships*:
+    - ``file_b`` (FK side / fact table) is LEFT-JOINed to ``file_a`` (PK side
+      / dimension table) on the stated columns.
+    - The fact table accumulates dimension columns without duplicating rows.
+
+    For ``same_dimension`` and ``shared_key`` relationships (same grain),
+    tables are stacked with ``pd.concat`` as before.
+
+    Any tables not involved in a pk_fk join are appended via concat so no
+    data is lost.
+
+    Example
+    -------
+    File A: agents.xlsx  — agent_id (PK), agent_name, team
+    File B: calls.xlsx   — agent_id (FK), call_date, duration
+
+    Result: calls.xlsx LEFT JOIN agents.xlsx ON agent_id
+    → one row per call, enriched with agent_name and team columns.
+    """
+    if not confirmed_relationships or len(dfs) < 2:
+        return pd.concat(dfs, ignore_index=True, sort=False)
+
+    # table_name → DataFrame lookup
+    table_df_map: dict[str, pd.DataFrame] = dict(zip(table_names, dfs))
+
+    # Collect pk_fk join instructions (skip non-pk_fk relationship types)
+    pk_fk_joins: list[dict] = []
+    for rel in confirmed_relationships:
+        if rel.get("relationship_type") != "pk_fk":
+            continue
+        tbl_a = upload_table_map.get(rel.get("file_a", ""))  # PK/dimension side
+        tbl_b = upload_table_map.get(rel.get("file_b", ""))  # FK/fact side
+        col_a = rel.get("col_a", "")
+        col_b = rel.get("col_b", "")
+        if tbl_a and tbl_b and col_a and col_b and tbl_a in table_df_map and tbl_b in table_df_map:
+            pk_fk_joins.append({"fact": tbl_b, "dim": tbl_a, "fact_col": col_b, "dim_col": col_a})
+            logger.info(
+                "RELATIONSHIP_JOIN fact=%s.%s FK→PK=%s.%s",
+                tbl_b, col_b, tbl_a, col_a,
+            )
+
+    if not pk_fk_joins:
+        # No valid pk_fk relationships resolved — fall back to concat
+        logger.info("_apply_relationships: no pk_fk joins resolved, falling back to concat")
+        return pd.concat(dfs, ignore_index=True, sort=False)
+
+    # Determine the primary fact table (first pk_fk join's fact side)
+    fact_name = pk_fk_joins[0]["fact"]
+    result = table_df_map[fact_name].copy()
+    joined: set[str] = {fact_name}
+
+    for join in pk_fk_joins:
+        if join["fact"] != fact_name:
+            continue  # multi-hop joins deferred to concat fallback below
+        dim_name = join["dim"]
+        if dim_name in joined or dim_name not in table_df_map:
+            continue
+        dim_df = table_df_map[dim_name]
+        # Only bring in columns the fact table doesn't already have (avoid duplicates).
+        new_cols = [c for c in dim_df.columns if c != join["dim_col"] and c not in result.columns]
+        merge_df = dim_df[[join["dim_col"]] + new_cols]
+        result = result.merge(
+            merge_df,
+            left_on=join["fact_col"],
+            right_on=join["dim_col"],
+            how="left",
+            suffixes=("", f"_{dim_name}"),
+        )
+        joined.add(dim_name)
+        logger.info(
+            "RELATIONSHIP_JOIN merged dim=%s (%d new cols) into fact=%s → %d rows",
+            dim_name, len(new_cols), fact_name, len(result),
+        )
+
+    # Any table not covered by a pk_fk join is stacked (same-grain concat).
+    remaining = [df for name, df in table_df_map.items() if name not in joined]
+    if remaining:
+        result = pd.concat([result] + remaining, ignore_index=True, sort=False)
+
+    return result
 
 
 _EXCEL_EPOCH = pd.Timestamp("1899-12-30")
@@ -94,18 +205,24 @@ def _infer_kpi_format(formula: str, kpi_format: str = "") -> str:
     return "decimal"
 
 
+def _norm_col(s: str) -> str:
+    """Lowercase + collapse non-alphanumeric runs to single underscore."""
+    return re.sub(r"_+", "_", re.sub(r"[^\w]", "_", s.lower())).strip("_")
+
+
 def _resolve_col(name: str, df_cols: "pd.Index") -> str | None:
     """
-    Resolve a column name against the dataframe, trying exact match first then
-    a normalised (lowercase + non-word → underscore) fallback.
+    Resolve a column name against the dataframe.
+    Tries exact match first, then normalised (lowercase + non-word → underscore)
+    comparison on BOTH sides so that 'rubric_score' matches 'Rubric Score' and
+    'Avg Handle Time' matches 'avg_handle_time'.
     Returns the actual column name present in df_cols, or None.
     """
     if name in df_cols:
         return name
-    normalised = re.sub(r"[^\w]", "_", name.lower()).strip("_")
-    normalised = re.sub(r"_+", "_", normalised)
+    normalised = _norm_col(name)
     for col in df_cols:
-        if col == normalised:
+        if _norm_col(col) == normalised:
             return col
     return None
 
@@ -303,7 +420,11 @@ def validate_dashboard_config(
         }
     }
     """
-    df = _load_staging_df(staging_table_name)
+    df = _load_staging_df(
+        staging_table_name,
+        confirmed_relationships=recipe_config.get("confirmed_relationships") or None,
+        upload_table_map=recipe_config.get("upload_table_map") or None,
+    )
     if df.empty:
         return {
             "valid": False,
@@ -339,13 +460,14 @@ def validate_dashboard_config(
             if excel_mask.all():
                 parse_rate = 1.0  # Excel serials are always valid
             else:
-                # Try dayfirst (DD-MM-YYYY) then generic mixed
-                parsed = pd.to_datetime(sample.astype(str), errors="coerce", dayfirst=True)
+                # format="mixed" infers per-value format (ISO, DD-MM-YYYY, DD/MM/YYYY);
+                # dayfirst=True breaks ties for ambiguous dates (e.g. "01-02-2024")
+                # without triggering the pandas warning that fires when dayfirst=True
+                # is combined with a detected %Y-%m-%d column.
+                parsed = pd.to_datetime(
+                    sample.astype(str), errors="coerce", format="mixed", dayfirst=True
+                )
                 parse_rate = float(parsed.notna().mean())
-                if parse_rate < 0.5:
-                    # Try ISO / mixed format as fallback
-                    parsed2 = pd.to_datetime(sample.astype(str), errors="coerce", format="mixed")
-                    parse_rate = float(parsed2.notna().mean())
 
             if parse_rate < 0.5:
                 errors.append(
@@ -363,7 +485,7 @@ def validate_dashboard_config(
             if parse_rate >= 0.5:
                 try:
                     all_dates = pd.to_datetime(
-                        df[date_col].dropna(), errors="coerce", dayfirst=True
+                        df[date_col].dropna(), errors="coerce", format="mixed", dayfirst=True
                     ).dropna()
                     if len(all_dates) >= 2:
                         span_days = int((all_dates.max() - all_dates.min()).days)
@@ -409,7 +531,9 @@ def validate_dashboard_config(
             + ", ".join(high_card)
         )
     details["missing_filter_columns"] = missing
-    details["high_cardinality_filters"] = [h.split(" (")[0] for h in high_card]
+    # L6: Track raw column names separately to avoid splitting on " (" within column names
+    details["high_cardinality_filters"] = [f for f in recipe_config.get("filters", [])
+                                            if f not in missing and int(df[f].nunique()) > 100]
 
     # ── KPI formulas ─────────────────────────────────────────────────────
     failing: list[str] = []
@@ -457,7 +581,17 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
     for _w in _preflight.get("warnings", []):
         logger.info("COMPUTE_PREFLIGHT warning: %s", _w)
 
-    df = _load_staging_df(staging_table_name)
+    # Extract PK/FK relationship context stored by session_generator.
+    # When present, _load_staging_df will JOIN fact/dimension tables instead of
+    # raw-concatenating them, giving formulas access to cross-file columns.
+    _confirmed_rels = recipe_config.get("confirmed_relationships") or []
+    _upload_table_map = recipe_config.get("upload_table_map") or {}
+
+    df = _load_staging_df(
+        staging_table_name,
+        confirmed_relationships=_confirmed_rels or None,
+        upload_table_map=_upload_table_map or None,
+    )
     if df.empty:
         return {"kpi_summaries": [], "time_series": [], "breakdown": []}
 
@@ -469,17 +603,20 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
         if df.empty:
             return {"kpi_summaries": [], "time_series": [], "breakdown": [], "insights": []}
 
+    # df_full: full filter-applied dataset used for KPI overall (card) values.
+    # This matches what validate_formula computes so the recipe editor and
+    # dashboard card always agree — even when some rows lack a parseable date.
+    df_full = df.copy()
+
     date_col = recipe_config.get("date_column")
     granularity = (granularity_override or recipe_config.get("granularity", "monthly")).lower()
     kpis = recipe_config.get("kpis", [])
     dimensions = recipe_config.get("dimensions", [])
 
-    # Parse date column — handles three cases per row:
+    # Parse date column for time-series — handles three cases per row:
     #   1. Numeric value in Excel serial range (e.g. 46110 → 2026-04-01)
     #   2. Datetime string / proper datetime (pd.to_datetime handles it)
-    #   3. Anything else → NaT (dropped below)
-    # Two-pass approach so mixed columns (staging tables from multi-file datasets
-    # with different date storage formats) are handled correctly.
+    #   3. Anything else → NaT (dropped below — only affects time series, not card values)
     if date_col and date_col in df.columns:
         as_numeric = pd.to_numeric(df[date_col], errors="coerce")
         excel_mask = as_numeric.notna() & as_numeric.between(_EXCEL_DATE_MIN, _EXCEL_DATE_MAX)
@@ -508,24 +645,38 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
         is_ros = kpi.get("aggregation") == "ratio_of_sums" and "/" in formula
 
         if is_ros:
+            # Overall card value: use df_full (no date filter) to match validate_formula
             ros_parts = [p.strip() for p in formula.split("/", 1)]
+            num_full = _resolve_expr(ros_parts[0], df_full)
+            den_full = _resolve_expr(ros_parts[1], df_full)
+            if num_full is None or den_full is None or num_full.empty or den_full.empty:
+                # H8: include format on early-exit paths for consistent output
+                kpi_summaries.append({"name": name, "value": None, "formula": formula,
+                                      "format": _infer_kpi_format(formula, kpi.get("format", ""))})
+                continue
+            den_total = float(den_full.sum())
+            overall = float(num_full.sum()) / den_total if den_total != 0 else None
+            # Time-series series still comes from date-indexed df
             num_s = _resolve_expr(ros_parts[0], df)
             den_s = _resolve_expr(ros_parts[1], df)
-            if num_s is None or den_s is None or num_s.empty or den_s.empty:
-                kpi_summaries.append({"name": name, "value": None, "formula": formula})
-                continue
-            den_total = float(den_s.sum())
-            overall = float(num_s.sum()) / den_total if den_total != 0 else None
-            series = num_s / den_s.replace(0, pd.NA)
+            series = (num_s / den_s.replace(0, pd.NA)) if (num_s is not None and den_s is not None) else None
             agg = "ratio_of_sums"
         else:
-            series = _eval_formula(df, formula)
-            if series.empty:
+            # Overall card value: use df_full (no date filter) to match validate_formula
+            series_full = _eval_formula(df_full, formula)
+            if series_full.empty:
                 kpi_summaries.append({"name": name, "value": None, "formula": formula})
                 continue
             agg = _formula_agg(formula)
-            raw_val = series.mean() if agg in ("mean", "ratio") else series.sum()
+            if series_full.empty:
+                # H8: include format on early-exit paths for consistent output
+                kpi_summaries.append({"name": name, "value": None, "formula": formula,
+                                      "format": _infer_kpi_format(formula, kpi.get("format", ""))})
+                continue
+            raw_val = series_full.mean() if agg in ("mean", "ratio") else series_full.sum()
             overall = None if pd.isna(raw_val) else float(raw_val)
+            # Time-series series still comes from date-indexed df
+            series = _eval_formula(df, formula)
 
         if overall is None:
             kpi_summaries.append({"name": name, "value": None, "formula": formula,
@@ -539,8 +690,9 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
             "format": _infer_kpi_format(formula, kpi.get("format", "")),
         })
 
-        # Time series (resampled)
-        if date_col:
+        # Time series (resampled) — uses date-indexed df
+        # H10: also skip if the entire series is NaN (e.g. all denominators were zero)
+        if date_col and series is not None and not series.empty and not series.isna().all():
             if is_ros:
                 resampled = (
                     num_s.resample(rule).sum()
@@ -575,13 +727,14 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
                         return pd.NA
                     d_sum = d.sum()
                     return float(n.sum() / d_sum) if d_sum != 0 else pd.NA
-                grouped = df_reset.groupby(dim).apply(_ros_group, include_groups=False).dropna()
+                # include_groups was removed in pandas 2.3 (groups excluded by default)
+                grouped = df_reset.groupby(dim).apply(_ros_group).dropna()
             else:
+                # L5: bind loop variables in default args to capture current iteration values
                 grouped = df_reset.groupby(dim).apply(
-                    lambda g: _eval_formula(g, formula).mean()
-                    if agg in ("mean", "ratio")
-                    else _eval_formula(g, formula).sum(),
-                    include_groups=False,
+                    lambda g, _f=formula, _a=agg: _eval_formula(g, _f).mean()
+                    if _a in ("mean", "ratio")
+                    else _eval_formula(g, _f).sum(),
                 ).dropna()
 
             breakdown.append({
@@ -634,8 +787,18 @@ def _generate_insights(kpi_summaries: list[dict], time_series: list[dict]) -> li
         pct_change = (last - prev) / abs(prev) * 100
         overall_change = (last - first) / abs(first) * 100 if first != 0 else 0
 
-        is_ratio = "/" in formula
-        fmt = lambda v: f"{v * 100:.1f}%" if is_ratio else f"{v:,.1f}"
+        # H11: Use stored format rather than heuristic "/" check to avoid double-multiplying
+        # data already stored as 0-100 percentages (e.g. a "percent_resolved" column).
+        fmt_name = kpi.get("format") or _infer_kpi_format(formula)
+        if fmt_name == "percentage":
+            # Ratio formula results are 0-1; explicit percent columns are 0-100
+            fmt = (lambda v: f"{v * 100:.1f}%") if abs(value) <= 1 else (lambda v: f"{v:.1f}%")
+        elif fmt_name == "currency":
+            fmt = lambda v: f"${v:,.2f}"
+        elif fmt_name == "integer":
+            fmt = lambda v: f"{int(v):,}"
+        else:
+            fmt = lambda v: f"{v:,.2f}"
 
         if abs(pct_change) >= 15:
             severity = "high" if abs(pct_change) >= 25 else "medium"

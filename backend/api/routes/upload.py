@@ -110,7 +110,7 @@ def get_profile(
     if not upload:
         raise HTTPException(404, "Upload not found.")
     if upload.status in ("pending", "profiling"):
-        raise HTTPException(202, "Profiling still in progress.")
+        raise HTTPException(503, detail={"status": upload.status, "message": "Profiling still in progress."})
     if upload.status == "failed":
         raise HTTPException(500, f"Profiling failed: {upload.error_message}")
 

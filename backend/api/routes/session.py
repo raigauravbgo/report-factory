@@ -18,7 +18,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from models.staging_table import StagingTable
 from models.upload import Upload
+from schemas.interview import STEP_LABELS as _STEP_LABELS  # H2: single source of truth
 from services import schema_relationships as sr
 
 logger = logging.getLogger(__name__)
@@ -68,15 +70,6 @@ class InterviewTurnResponse(BaseModel):
     completed: bool
     interview_result: dict | None = None
 
-
-_STEP_LABELS = [
-    "Data type",
-    "Date column",
-    "KPI definitions",
-    "Dimensions",
-    "Time granularity",
-    "Filters",
-]
 
 
 @router.post("/{dataset_id}/interview", response_model=InterviewTurnResponse)
@@ -131,13 +124,35 @@ class KpiSuggestRequest(BaseModel):
     interview_answers: dict = {}
 
 
-@router.post("/{dataset_id}/kpi-suggestions")
+class KpiSuggestionResponse(BaseModel):
+    kpi_id: str
+    display_name: str
+    formula: str
+    confidence: float
+    matched_columns: dict = {}
+    source: str = "catalog"
+    domain: str | None = None
+    aggregation: str = ""
+    format: str = ""
+
+
+@router.post("/{dataset_id}/kpi-suggestions", response_model=list[KpiSuggestionResponse])  # M12
 def kpi_suggestions(dataset_id: int, body: KpiSuggestRequest, db: Session = Depends(get_db)):
     from services.kpi_suggester import suggest
 
     profiles = _load_profiles(dataset_id, body.upload_ids, db)
-    results = suggest(profiles, body.interview_answers)
-    return results
+    if not profiles:
+        logger.warning(
+            "kpi_suggestions: no profile data found for dataset_id=%d "
+            "(profiling may still be running or all uploads failed)",
+            dataset_id,
+        )
+        return []
+    try:
+        return suggest(profiles, body.interview_answers)
+    except Exception as exc:
+        logger.error("kpi_suggestions: unexpected error dataset_id=%d: %s", dataset_id, exc)
+        return []
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
@@ -147,17 +162,17 @@ class ValidateRequest(BaseModel):
     selected_kpis: list[dict] = []     # AI-generated: full KPI dicts with formula
 
 
-@router.post("/{dataset_id}/validate")
+@router.post("/{dataset_id}/validate")  # M13: response_model omitted — shape varies per validator
 def validate_data(dataset_id: int, body: ValidateRequest, db: Session = Depends(get_db)):
     from services.data_validator import validate
-    from models.staging_table import StagingTable
 
-    uploads = db.query(Upload).filter(Upload.dataset_id == dataset_id).all()
-    staging_tables = []
-    for u in uploads:
-        st = db.query(StagingTable).filter(StagingTable.upload_id == u.id).first()
-        if st:
-            staging_tables.append(st)
+    # H3: Single JOIN query replaces N+1 (one query per upload)
+    staging_tables = (
+        db.query(StagingTable)
+        .join(Upload, StagingTable.upload_id == Upload.id)
+        .filter(Upload.dataset_id == dataset_id)
+        .all()
+    )
 
     result = validate(
         staging_tables,

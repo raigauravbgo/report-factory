@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   LineChart, Line, BarChart, Bar,
@@ -54,17 +54,25 @@ interface TrendChartProps {
   onBrushChange: (start: number, end: number) => void;
 }
 
-function TrendChart({ ts, formula, fmt, color, zoom, onZoomIn, onZoomOut, onResetZoom, onBrushChange }: TrendChartProps) {
-  const [chartReady, setChartReady] = useState(false);
-  const readyRef = useRef(false);
-
-  const handleResize = (w: number) => {
-    if (w > 0 && !readyRef.current) {
-      readyRef.current = true;
-      setChartReady(true);
+// M4: Error boundary catches Recharts crashes so one bad chart doesn't take down the page
+class ChartErrorBoundary extends (require("react") as typeof import("react")).Component<
+  { children: import("react").ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: import("react").ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() {
+    if (this.state.hasError) {
+      return <p className="text-sm text-gray-400 py-8 text-center">Chart failed to render.</p>;
     }
-  };
+    return this.props.children;
+  }
+}
 
+function TrendChart({ ts, formula, fmt, color, zoom, onZoomIn, onZoomOut, onResetZoom, onBrushChange }: TrendChartProps) {
   const cleanData = ts.data.map((d) => ({
     ...d,
     value: Number.isFinite(d.value) ? d.value : null,
@@ -73,6 +81,13 @@ function TrendChart({ ts, formula, fmt, color, zoom, onZoomIn, onZoomOut, onRese
   const safeStart = Number.isFinite(zoom.start) ? Math.min(zoom.start, ts.data.length - 1) : 0;
   const safeEnd   = Number.isFinite(zoom.end)   ? Math.min(zoom.end,   ts.data.length - 1) : ts.data.length - 1;
 
+  // A stable key forces LineChart to remount whenever the data identity changes.
+  // This ensures <Brush> is always part of the *initial* render of the chart so
+  // Recharts computes its layout offsets correctly from the start — preventing the
+  // "NaN for x / width / x1 / x2" warnings that occur when Brush is added to an
+  // already-mounted chart whose ResizeObserver hasn't fired yet.
+  const chartKey = `${ts.kpi}-${ts.data.length}`;
+
   return (
     <>
       <div className="flex gap-1 justify-end mb-1">
@@ -80,14 +95,14 @@ function TrendChart({ ts, formula, fmt, color, zoom, onZoomIn, onZoomOut, onRese
         <button onClick={onZoomOut} title="Zoom out" className="px-2 py-0.5 rounded text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium">－</button>
         <button onClick={onResetZoom} title="Reset zoom" className="px-2 py-0.5 rounded text-xs text-gray-400 hover:text-gray-600">Reset</button>
       </div>
-      <ResponsiveContainer width="100%" height={220} onResize={handleResize}>
-        <LineChart data={cleanData} margin={{ top: 4, right: 8, left: 0, bottom: 40 }}>
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart key={chartKey} data={cleanData} margin={{ top: 4, right: 8, left: 0, bottom: 40 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
           <XAxis dataKey="date" tick={{ fontSize: 10 }} tickLine={false} />
           <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => formatAxisValue(v, formula, fmt)} />
           <Tooltip formatter={(v: unknown) => formatKpiValue(v as number, formula, fmt)} />
           <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
-          {chartReady && ts.data.length > 2 && (
+          {ts.data.length > 2 && (
             <Brush
               dataKey="date"
               height={28}
@@ -369,6 +384,14 @@ export default function DashboardPage() {
           </section>
         )}
 
+        {/* M11: Warn when selected granularity produces no time series (dataset too coarse) */}
+        {!filtering && activeGranularity && time_series.length === 0 && kpi_summaries.length > 0 && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
+            No time series data for <strong>{activeGranularity}</strong> granularity.
+            {" "}Try switching to a coarser option (e.g. Weekly or Monthly) if the data doesn&apos;t span enough days.
+          </div>
+        )}
+
         {/* Trend charts */}
         {time_series.length > 0 && (
           <section className="space-y-3">
@@ -402,19 +425,22 @@ export default function DashboardPage() {
                         Only 1 period of data — switch to <strong>Daily</strong> or <strong>Weekly</strong> for a trend view.
                       </p>
                     ) : (
-                      <TrendChart
-                        ts={ts}
-                        formula={formula}
-                        fmt={fmt}
-                        color={COLORS[i % COLORS.length]}
-                        zoom={getZoom(ts.kpi, ts.data.length)}
-                        onZoomIn={() => zoomIn(ts.kpi, ts.data.length)}
-                        onZoomOut={() => zoomOut(ts.kpi, ts.data.length)}
-                        onResetZoom={() => resetZoom(ts.kpi)}
-                        onBrushChange={(start, end) =>
-                          setZoomState((z) => ({ ...z, [ts.kpi]: { start, end } }))
-                        }
-                      />
+                      // M4: Error boundary prevents a single bad chart from crashing the page
+                      <ChartErrorBoundary>
+                        <TrendChart
+                          ts={ts}
+                          formula={formula}
+                          fmt={fmt}
+                          color={COLORS[i % COLORS.length]}
+                          zoom={getZoom(ts.kpi, ts.data.length)}
+                          onZoomIn={() => zoomIn(ts.kpi, ts.data.length)}
+                          onZoomOut={() => zoomOut(ts.kpi, ts.data.length)}
+                          onResetZoom={() => resetZoom(ts.kpi)}
+                          onBrushChange={(start, end) =>
+                            setZoomState((z) => ({ ...z, [ts.kpi]: { start, end } }))
+                          }
+                        />
+                      </ChartErrorBoundary>
                     )}
                   </ChartCard>
                 );

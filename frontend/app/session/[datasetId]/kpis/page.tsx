@@ -33,27 +33,38 @@ export default function KpisPage() {
   const [customFormula, setCustomFormula] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [kpiError, setKpiError] = useState<string | null>(null);
+  const [addingCustom, setAddingCustom] = useState(false);
+  // C5: Use retryCount to re-trigger the fetch without reloading the page
+  const [retryCount, setRetryCount] = useState(0);
 
   const dragItem = useRef<number | null>(null);
   const dragOver = useRef<number | null>(null);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem(`dataset_${datasetId}_uploads`);
-    const uploadIds = stored
-      ? (JSON.parse(stored) as { uploadId: number }[]).map((u) => u.uploadId)
-      : [];
-    const interviewAnswers = (() => {
+    // C4: Guard all JSON.parse calls against corrupted sessionStorage
+    let uploadIds: number[] = [];
+    try {
+      const stored = sessionStorage.getItem(`dataset_${datasetId}_uploads`);
+      if (stored) uploadIds = (JSON.parse(stored) as { uploadId: number }[]).map((u) => u.uploadId);
+    } catch { /* ignore corrupted storage */ }
+
+    let interviewAnswers = {};
+    try {
       const raw = sessionStorage.getItem(`dataset_${datasetId}_interview`);
-      return raw ? JSON.parse(raw) : {};
-    })();
+      if (raw) interviewAnswers = JSON.parse(raw);
+    } catch { /* ignore corrupted storage */ }
 
     api.getKpiSuggestions(Number(datasetId), uploadIds, interviewAnswers).then((res) => {
       setSuggestions(res);
       // Pre-select high-confidence items
       setSelected(res.filter((k) => k.confidence >= 0.75).slice(0, 8));
       setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [datasetId]);
+    }).catch((e) => {
+      setKpiError(String(e));
+      setLoading(false);
+    });
+  }, [datasetId, retryCount]);
 
   const domains = ["all", ...Array.from(new Set(suggestions.map((s) => s.domain || "other")))];
 
@@ -79,7 +90,7 @@ export default function KpisPage() {
   const deselectAll = () => setSelected([]);
 
   const addCustom = () => {
-    if (!customName.trim()) return;
+    if (!customName.trim() || !customFormula.trim()) return;
     const kpi: KpiSuggestion = {
       kpi_id: `custom_${Date.now()}`,
       display_name: customName.trim(),
@@ -93,14 +104,27 @@ export default function KpisPage() {
     logEvent("custom_kpi_created", "kpis", { name: kpi.display_name, formula: kpi.formula }, { datasetId: Number(datasetId) });
     setCustomName("");
     setCustomFormula("");
+    setAddingCustom(false);
+  };
+
+  const cancelCustom = () => {
+    setCustomName("");
+    setCustomFormula("");
+    setAddingCustom(false);
   };
 
   const onDragStart = (i: number) => { dragItem.current = i; };
   const onDragEnter = (i: number) => { dragOver.current = i; };
+  // H14: Reset refs when drag is cancelled (dragged outside list and released)
+  const onDragEnd = () => {
+    dragItem.current = null;
+    dragOver.current = null;
+  };
   const onDrop = () => {
     if (dragItem.current === null || dragOver.current === null) return;
     const from = dragItem.current;
-    const to = dragOver.current;
+    // L9: Clamp index to valid range before splice
+    const to = Math.max(0, Math.min(dragOver.current, selected.length - 1));
     const reordered = [...selected];
     const [moved] = reordered.splice(from, 1);
     reordered.splice(to, 0, moved);
@@ -116,12 +140,16 @@ export default function KpisPage() {
     setGenerateError(null);
     try {
       const confirmedRel = (() => {
-        const raw = sessionStorage.getItem(`dataset_${datasetId}_relationships`);
-        return raw ? JSON.parse(raw) : [];
+        try {
+          const raw = sessionStorage.getItem(`dataset_${datasetId}_relationships`);
+          return raw ? JSON.parse(raw) : [];
+        } catch { return []; }
       })();
       const interviewResult = (() => {
-        const raw = sessionStorage.getItem(`dataset_${datasetId}_interview`);
-        return raw ? JSON.parse(raw) : {};
+        try {
+          const raw = sessionStorage.getItem(`dataset_${datasetId}_interview`);
+          return raw ? JSON.parse(raw) : {};
+        } catch { return {}; }
       })();
       logEvent("generate_dashboard_clicked", "kpis", {
         kpi_count: selected.length,
@@ -191,13 +219,26 @@ export default function KpisPage() {
 
             {/* KPI list */}
             <div className="flex-1 overflow-y-auto">
-              {available.length === 0 ? (
+              {kpiError && (
+                <div className="m-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 flex items-start justify-between gap-3">
+                  <p className="text-xs text-red-700">{kpiError}</p>
+                  <button
+                    onClick={() => { setKpiError(null); setLoading(true); setRetryCount((c) => c + 1); }}
+                    className="text-xs text-[#00B5AD] hover:underline font-medium flex-shrink-0"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {!kpiError && available.length === 0 ? (
                 <p className="p-5 text-sm text-gray-400">No KPIs match the current filter.</p>
-              ) : (
+              ) : !kpiError && (
                 <ul className="divide-y divide-gray-50">
                   {available.map((kpi) => (
                     <li
                       key={kpi.kpi_id}
+                      // H13: Single click on row adds KPI; checkbox click stops propagation so no double-fire
+                      onClick={() => addKpi(kpi)}
                       onDoubleClick={() => setCommentOpen(commentOpen === kpi.kpi_id ? null : kpi.kpi_id)}
                       className="px-5 py-3 hover:bg-gray-50 cursor-pointer group"
                     >
@@ -206,7 +247,7 @@ export default function KpisPage() {
                           <input
                             type="checkbox"
                             checked={false}
-                            onChange={() => addKpi(kpi)}
+                            onChange={() => {/* handled by parent li onClick */}}
                             onClick={(e) => e.stopPropagation()}
                             className="mt-0.5 h-4 w-4 rounded accent-teal-600 flex-shrink-0"
                           />
@@ -264,6 +305,7 @@ export default function KpisPage() {
                       draggable
                       onDragStart={() => onDragStart(i)}
                       onDragEnter={() => onDragEnter(i)}
+                      onDragEnd={onDragEnd}
                       className="flex items-start gap-2 px-4 py-3 bg-white hover:bg-gray-50 cursor-grab active:cursor-grabbing"
                     >
                       <span className="text-gray-300 mt-0.5 flex-shrink-0">⠿</span>
@@ -287,29 +329,51 @@ export default function KpisPage() {
             </div>
 
             {/* Add custom KPI */}
-            <div className="border-t border-gray-100 p-4 space-y-2 bg-white">
-              <p className="text-xs font-semibold text-gray-500">Add custom KPI</p>
-              <input
-                type="text"
-                placeholder="KPI name"
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Formula, e.g. revenue / contacts"
-                value={customFormula}
-                onChange={(e) => setCustomFormula(e.target.value)}
-                className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none font-mono"
-              />
-              <button
-                onClick={addCustom}
-                disabled={!customName.trim()}
-                className="w-full py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
-              >
-                + Add
-              </button>
+            <div className="border-t border-gray-100 bg-white">
+              {addingCustom ? (
+                <div className="p-4 space-y-2 bg-teal-50/40">
+                  <p className="text-xs font-semibold text-gray-600">New custom KPI</p>
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="KPI name"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addCustom(); if (e.key === "Escape") cancelCustom(); }}
+                    className="w-full text-xs border border-teal-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#00B5AD]"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Formula, e.g. revenue / contacts"
+                    value={customFormula}
+                    onChange={(e) => setCustomFormula(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addCustom(); if (e.key === "Escape") cancelCustom(); }}
+                    className="w-full text-xs border border-teal-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#00B5AD] font-mono"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={addCustom}
+                      disabled={!customName.trim() || !customFormula.trim()}
+                      className="text-xs text-[#00B5AD] font-medium hover:underline disabled:opacity-40"
+                    >
+                      Add
+                    </button>
+                    <span className="text-gray-300">·</span>
+                    <button onClick={cancelCustom} className="text-xs text-gray-400 hover:text-gray-600">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="px-4 py-2.5">
+                  <button
+                    onClick={() => setAddingCustom(true)}
+                    className="text-xs text-[#00B5AD] hover:underline font-medium"
+                  >
+                    + Add custom KPI
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Generate button */}

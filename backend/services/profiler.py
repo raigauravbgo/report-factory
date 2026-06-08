@@ -117,13 +117,14 @@ def _looks_like_date(series: pd.Series, name: str, non_null: pd.Series) -> bool:
     sample_str = non_null.head(200).astype(str).str.strip()
 
     # Fast path: name strongly suggests a date column
+    # H9: Use same 0.85 threshold as general parse — 0.5 was too permissive and
+    # caused columns with mixed data (e.g. 60% dates) to be typed as DATE.
     if _DATE_NAME_HINTS.search(name):
-        # Try dayfirst (DD-MM-YYYY / DD/MM/YYYY) first, then default
         parsed = pd.to_datetime(sample_str, errors="coerce", dayfirst=True)
-        if parsed.notna().mean() >= 0.5:
+        if parsed.notna().mean() >= _DATE_PARSE_THRESHOLD:
             return True
         parsed = pd.to_datetime(sample_str, errors="coerce", format="mixed")
-        return parsed.notna().mean() >= 0.5
+        return parsed.notna().mean() >= _DATE_PARSE_THRESHOLD
 
     # Check if values look like DD-MM-YYYY / DD/MM/YYYY by pattern
     dd_mm_matches = sample_str.str.match(_DD_MM_YYYY_RE).mean()

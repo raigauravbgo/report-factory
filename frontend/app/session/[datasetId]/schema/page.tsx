@@ -3,8 +3,9 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import ColumnTable from "@/components/ColumnTable";
+import SchemaRelationships from "@/components/SchemaRelationships";
 import { api } from "@/lib/api";
-import type { ColumnProfile, ColumnRole, ProfilingResult, SemanticTag } from "@/lib/types";
+import type { ColumnProfile, ColumnRole, ProfilingResult, RelationshipSuggestion, SemanticTag } from "@/lib/types";
 
 interface ColumnOverrideState {
   role?: ColumnRole;
@@ -32,6 +33,9 @@ export default function SchemaPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [navigating, setNavigating] = useState(false);
+  const [sheetChanging, setSheetChanging] = useState(false); // M3: prevent concurrent sheet changes
+  const [relationships, setRelationships] = useState<RelationshipSuggestion[]>([]);
+  const [relLoading, setRelLoading] = useState(false);
 
   // Load all upload profiles from sessionStorage (set by upload page)
   useEffect(() => {
@@ -41,7 +45,14 @@ export default function SchemaPage() {
       setLoading(false);
       return;
     }
-    const uploadIds: { uploadId: number; filename: string }[] = JSON.parse(stored);
+    let uploadIds: { uploadId: number; filename: string }[];
+    try {
+      uploadIds = JSON.parse(stored);
+    } catch {
+      setError("Session data is corrupted. Please re-upload your files.");
+      setLoading(false);
+      return;
+    }
 
     Promise.all(
       uploadIds.map(async (u) => {
@@ -69,6 +80,18 @@ export default function SchemaPage() {
     ).then((results) => {
       setTabs(results);
       setLoading(false);
+
+      // If multiple files were uploaded, auto-detect cross-file PK/FK relationships.
+      // The SchemaRelationships component will display them and let the user confirm
+      // which ones to use as join keys before generating the dashboard.
+      const profiledCount = results.filter((r) => r.profile !== null).length;
+      if (profiledCount > 1) {
+        setRelLoading(true);
+        api.getRelationships(Number(datasetId))
+          .then(setRelationships)
+          .catch(() => {})
+          .finally(() => setRelLoading(false));
+      }
     });
   }, [datasetId]);
 
@@ -106,14 +129,22 @@ export default function SchemaPage() {
     }
   }
 
+  function handleConfirmRelationships(confirmed: RelationshipSuggestion[]) {
+    sessionStorage.setItem(`dataset_${datasetId}_relationships`, JSON.stringify(confirmed));
+    setRelationships(confirmed);
+  }
+
   async function handleNavigate(to: string) {
     setNavigating(true);
     try {
       // Auto-save all tabs that have unsaved overrides so is_filter reaches the backend
+      // H15: Sequential saves prevent partial-save race condition from Promise.all
       const pending = tabs
         .map((t, i) => ({ tab: t, index: i }))
         .filter(({ tab }) => tab.profile && Object.keys(tab.overrides).length > 0);
-      await Promise.all(pending.map(({ index }) => handleSaveTab(index)));
+      for (const { index } of pending) {
+        await handleSaveTab(index);
+      }
     } catch {
       // ignore save errors — navigate anyway
     }
@@ -136,7 +167,9 @@ export default function SchemaPage() {
 
   async function handleSheetChange(sheet: string) {
     const tab = tabs[activeTab];
-    if (!tab) return;
+    // M3: Guard against concurrent requests from rapid sheet changes
+    if (!tab || sheetChanging) return;
+    setSheetChanging(true);
     try {
       const updated = await api.saveSchemaOverrides(tab.uploadId, {
         column_overrides: [],
@@ -146,6 +179,7 @@ export default function SchemaPage() {
         prev.map((t, i) => (i === activeTab ? { ...t, profile: updated } : t)),
       );
     } catch { /* ignore */ }
+    finally { setSheetChanging(false); }
   }
 
   if (loading) {
@@ -201,6 +235,8 @@ export default function SchemaPage() {
                 }`}
               >
                 {t.filename}
+                {/* M2: Show error indicator upfront so user sees which tabs failed */}
+                {t.profile === null && <span className="ml-1 text-red-400 text-xs" title="Profile failed to load">⚠</span>}
                 {t.saved && <span className="ml-1 text-teal-500 text-xs">✓</span>}
               </button>
             ))}
@@ -226,7 +262,8 @@ export default function SchemaPage() {
                   <select
                     value={activeSheet}
                     onChange={(e) => handleSheetChange(e.target.value)}
-                    className="text-xs border border-gray-200 rounded px-1 py-0.5 focus:outline-none"
+                    disabled={sheetChanging}
+                    className="text-xs border border-gray-200 rounded px-1 py-0.5 focus:outline-none disabled:opacity-50"
                   >
                     {tab.profile.sheet_names.map((s) => (
                       <option key={s} value={s}>{s}</option>
@@ -265,6 +302,30 @@ export default function SchemaPage() {
           </>
         ) : (
           <div className="text-sm text-red-500 p-4">Could not load profile for this file.</div>
+        )}
+
+        {/* Cross-file relationships — only shown when 2+ files are profiled */}
+        {tabs.filter((t) => t.profile !== null).length > 1 && (
+          <div className="space-y-3 border-t border-gray-100 pt-6">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700">Cross-File Relationships</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                AI-detected Primary Key → Foreign Key links across your files. Confirm the joins
+                to use when computing cross-file KPIs.
+              </p>
+            </div>
+            {relLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <span className="animate-spin h-4 w-4 border-2 border-teal-500 border-t-transparent rounded-full flex-shrink-0" />
+                Detecting relationships…
+              </div>
+            ) : (
+              <SchemaRelationships
+                suggestions={relationships}
+                onConfirm={handleConfirmRelationships}
+              />
+            )}
+          </div>
         )}
 
         {/* CTA row */}

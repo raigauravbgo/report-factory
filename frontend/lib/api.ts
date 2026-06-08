@@ -21,7 +21,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.text();
     throw new Error(`API ${res.status}: ${body}`);
   }
-  return res.json() as Promise<T>;
+  // M5: Parse first, then guard against FastAPI error shapes ({detail: "..."})
+  // that can arrive with a 2xx status (e.g. the 202 → 503 fix in upload.py)
+  const data: unknown = await res.json();
+  if (data !== null && typeof data === "object" && !Array.isArray(data)) {
+    const d = data as Record<string, unknown>;
+    if (typeof d.detail === "string") throw new Error(d.detail);
+    if (typeof d.message === "string" && d.status && typeof d.status === "string") {
+      throw new Error(d.message);
+    }
+  }
+  return data as T;
 }
 
 export const api = {

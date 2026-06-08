@@ -295,23 +295,99 @@ def _filter_valid_formulas(suggestions: list[dict], col_names: list[str]) -> lis
     return valid
 
 
+def _col_formula(col: str, fmt: str) -> str:
+    """Return the aggregation formula for a single column based on its format."""
+    if fmt in ("percentage", "decimal"):
+        return f"mean({col})"
+    return col  # integer / currency → sum via plain column name
+
+
+def _catalog_fallback(col_names: list[str]) -> list[dict]:
+    """
+    SequenceMatcher fallback: match catalog source_fields against actual column names.
+
+    Called when the AI call fails or returns no valid suggestions, so users
+    always see something useful instead of an empty list.
+    """
+    from difflib import SequenceMatcher
+
+    if not col_names:
+        return []
+
+    catalog = _load_catalog()
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
+
+    norm_map: dict[str, str] = {_norm(c): c for c in col_names}
+
+    def _best_col(fields: list[str]) -> tuple[str | None, float]:
+        best_col, best_score = None, 0.0
+        for field in fields:
+            nf = _norm(field)
+            for nc, orig in norm_map.items():
+                if nf == nc:
+                    return orig, 1.0
+                score = SequenceMatcher(None, nf, nc).ratio()
+                if score > best_score and score >= 0.55:
+                    best_col, best_score = orig, score
+        return best_col, best_score
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    for kpi in catalog:
+        source_fields = kpi.get("source_fields", [])
+        num_col, num_score = _best_col(source_fields)
+        if not num_col:
+            continue
+
+        fmt = kpi.get("format", "decimal")
+        den_raw = kpi.get("denominator", "_none_")
+
+        if den_raw and den_raw != "_none_":
+            den_col, den_score = _best_col([den_raw])
+            if den_col and den_col != num_col:
+                formula = f"{num_col} / {den_col}"
+                conf = round(min(num_score, den_score) * 0.9, 2)
+            else:
+                formula = _col_formula(num_col, fmt)
+                conf = round(num_score * 0.65, 2)
+        else:
+            formula = _col_formula(num_col, fmt)
+            conf = round(num_score, 2)
+
+        key = re.sub(r"\s+", "", formula.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+
+        results.append({
+            "kpi_id": kpi["kpi_id"],
+            "display_name": kpi["display_name"],
+            "formula": formula,
+            "confidence": conf,
+            "matched_columns": {num_col: "source"},
+            "source": "catalog",
+            "domain": kpi.get("domain", "ops"),
+            "description": kpi.get("description", ""),
+            "aggregation": "ratio_of_sums" if "/" in formula else "",
+            "format": fmt,
+            "catalog_match": kpi["kpi_id"],
+        })
+
+    results.sort(key=lambda r: -r["confidence"])
+    logger.info("kpi_suggester: catalog fallback matched %d KPIs from %d columns", len(results), len(col_names))
+    return results[:25]
+
+
 def suggest(profiles: list[dict], interview_answers: dict) -> list[dict]:
     """
-    AI-driven KPI suggestion.
+    AI-driven KPI suggestion with catalog fallback.
 
-    Sends column names + data samples for every uploaded file to the LLM and
-    asks it to identify computable KPIs with formulas using exact column names.
-
-    Parameters
-    ----------
-    profiles          : list of profile dicts from _load_profiles() in session.py.
-                        Each dict is the StagingTable.profile_data merged with
-                        {"filename": ..., "staging_table_name": ...}.
-    interview_answers : collected answers from the Flow 1 interview (may be empty).
-
-    Returns
-    -------
-    List of KPI suggestion dicts compatible with the recipe + compute pipeline.
+    Sends column names + data samples to the LLM and asks it to identify
+    computable KPIs. If the AI call fails or returns nothing valid, falls back
+    to SequenceMatcher against catalog source_fields so users always see KPIs.
     """
     if not profiles:
         return []
@@ -322,6 +398,7 @@ def suggest(profiles: list[dict], interview_answers: dict) -> list[dict]:
         filename = profile.get("filename", "dataset")
         staging_table_name = profile.get("staging_table_name")
 
+        # Defensive: skip columns without a name
         col_info = [
             {
                 "name": c["name"],
@@ -331,6 +408,7 @@ def suggest(profiles: list[dict], interview_answers: dict) -> list[dict]:
                 ][:5],
             }
             for c in columns
+            if c.get("name")
         ]
 
         sample_rows = (
@@ -347,8 +425,11 @@ def suggest(profiles: list[dict], interview_answers: dict) -> list[dict]:
             }
         )
 
+    all_col_names = [c["name"] for ctx in file_contexts for c in ctx["columns"]]
+
     prompt = _build_prompt(file_contexts, interview_answers)
 
+    ai_failed = False
     try:
         raw = chat_complete(
             messages=[
@@ -364,17 +445,24 @@ def suggest(profiles: list[dict], interview_answers: dict) -> list[dict]:
             temperature=0.2,
             json_mode=True,
         )
+        suggestions = _parse_ai_response(raw)
+        suggestions = _filter_valid_formulas(suggestions, all_col_names)
+        logger.info(
+            "kpi_suggester: AI returned %d valid suggestions for %d file(s)",
+            len(suggestions),
+            len(profiles),
+        )
     except Exception as exc:
-        logger.error("kpi_suggester: AI call failed: %s", exc)
-        return []
+        logger.error("kpi_suggester: AI call failed (%s) — using catalog fallback", exc)
+        suggestions = []
+        ai_failed = True
 
-    suggestions = _parse_ai_response(raw)
-    # Collect all column names across every file for formula validation
-    all_col_names = [c["name"] for ctx in file_contexts for c in ctx["columns"]]
-    suggestions = _filter_valid_formulas(suggestions, all_col_names)
-    logger.info(
-        "kpi_suggester: AI returned %d suggestions for %d file(s)",
-        len(suggestions),
-        len(profiles),
-    )
+    if not suggestions:
+        # M14: Distinguish API failure from genuinely no matching suggestions
+        if ai_failed:
+            logger.info("kpi_suggester: AI failed — falling back to catalog")
+        else:
+            logger.info("kpi_suggester: AI returned no valid suggestions — falling back to catalog")
+        suggestions = _catalog_fallback(all_col_names)
+
     return suggestions

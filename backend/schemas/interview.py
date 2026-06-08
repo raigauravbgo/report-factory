@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from pydantic import BaseModel
 
 STEP_LABELS = [
+    "Data type",        # H2: aligned with session Flow 1 (6 steps)
     "Date column",
     "KPI definitions",
     "Dimensions",
@@ -13,9 +16,11 @@ class KpiSpec(BaseModel):
     name: str
     formula: str
     aggregation: str = ""
+    format: str = ""          # H6: percentage | currency | duration | number
 
 
 class InterviewResult(BaseModel):
+    domain: str | None = None  # H1: data domain collected in Q1
     date_column: str
     kpis: list[KpiSpec]
     dimensions: list[str]
@@ -52,13 +57,13 @@ class ChartConfig(BaseModel):
 class RecipeConfig(BaseModel):
     upload_id: int
     dataset_id: int
-    column_mappings: dict[str, str]
-    date_column: str
-    granularity: str
-    dimensions: list[str]
-    filters: list[str]
-    kpis: list[KpiSpec]
-    chart_layout: list[ChartConfig]
+    column_mappings: dict[str, str] = {}
+    date_column: str | None = None   # L7: Optional — may be absent in partial configs
+    granularity: str = "monthly"
+    dimensions: list[str] = []
+    filters: list[str] = []
+    kpis: list[KpiSpec] = []
+    chart_layout: list[ChartConfig] = []
 
 
 class GenerateRecipeRequest(BaseModel):
