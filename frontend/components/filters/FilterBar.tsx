@@ -9,7 +9,10 @@ interface Props {
 }
 
 export default function FilterBar({ dimensions, filters, activeFilters, filterOptions, onFilterChange }: Props) {
-  const all = [...new Set([...dimensions, ...filters])];
+  // Show only the explicitly configured filter columns.
+  // Dimensions are used for grouping/breakdown, not row-level filtering.
+  // Fall back to dimensions only when no filters are configured.
+  const all = filters.length > 0 ? [...new Set(filters)] : [...new Set(dimensions)];
   if (all.length === 0) return null;
 
   const hasActiveFilter = Object.values(activeFilters).some(Boolean);

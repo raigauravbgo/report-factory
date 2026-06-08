@@ -6,11 +6,18 @@ import ColumnTable from "@/components/ColumnTable";
 import { api } from "@/lib/api";
 import type { ColumnRole, ProfilingResult } from "@/lib/types";
 
+interface ColumnOverrideState {
+  role?: ColumnRole;
+  semanticTag?: import("@/lib/types").SemanticTag;
+  inGrain?: boolean;
+  inFilter?: boolean;
+}
+
 export default function ProfilePage() {
   const { uploadId } = useParams<{ uploadId: string }>();
   const router = useRouter();
   const [result, setResult] = useState<ProfilingResult | null>(null);
-  const [overrides, setOverrides] = useState<Record<string, ColumnRole>>({});
+  const [overrides, setOverrides] = useState<Record<string, ColumnOverrideState>>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -19,8 +26,8 @@ export default function ProfilePage() {
       .catch((e) => setError(String(e)));
   }, [uploadId]);
 
-  function handleOverride(colName: string, role: ColumnRole) {
-    setOverrides((prev) => ({ ...prev, [colName]: role }));
+  function handleOverride(colName: string, patch: Partial<ColumnOverrideState>) {
+    setOverrides((prev) => ({ ...prev, [colName]: { ...prev[colName], ...patch } }));
   }
 
   function handleContinue() {

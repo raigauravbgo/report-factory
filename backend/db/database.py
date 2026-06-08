@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 # Resolved relative to this file so it works regardless of cwd.
@@ -7,17 +8,37 @@ _DB_PATH = Path(__file__).resolve().parent.parent / "dev.db"
 _SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 
-def get_conn() -> sqlite3.Connection:
+@contextmanager
+def get_conn():
+    """Yield an open sqlite3 connection, commit on success, rollback + close on error."""
     conn = sqlite3.connect(str(_DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _migrate_kpi_catalog() -> None:
+    """Add columns to kpi_catalog that were introduced after the initial schema was deployed.
+    Uses PRAGMA table_info so it is safe to run against both new and existing databases."""
+    with get_conn() as conn:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(kpi_catalog)").fetchall()}
+        if "aggregation" not in existing:
+            conn.execute("ALTER TABLE kpi_catalog ADD COLUMN aggregation TEXT DEFAULT ''")
 
 
 def init_db() -> None:
     sql = _SCHEMA_PATH.read_text()
     with get_conn() as conn:
         conn.executescript(sql)
+    # Run additive column migrations for tables not covered by Alembic
+    _migrate_kpi_catalog()
 
 
 def _deserialise_kpi(row: sqlite3.Row) -> dict:
@@ -26,6 +47,7 @@ def _deserialise_kpi(row: sqlite3.Row) -> dict:
         raw = d.get(field)
         d[field] = json.loads(raw) if raw else ([] if field != "expected_range" else None)
     d["reviewed"] = bool(d.get("reviewed", 0))
+    d.setdefault("aggregation", "")  # guard for rows written before column was added
     return d
 
 
@@ -35,8 +57,9 @@ def create_kpi(kpi: dict) -> dict:
         conn.execute(
             """INSERT INTO kpi_catalog
                (kpi_id, display_name, description, numerator, denominator,
-                format, domain, expected_range, aliases, source_fields, reviewed)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                format, domain, expected_range, aliases, source_fields, reviewed,
+                aggregation)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 kpi["kpi_id"],
                 kpi["display_name"],
@@ -49,6 +72,7 @@ def create_kpi(kpi: dict) -> dict:
                 json.dumps(kpi.get("aliases", [])),
                 json.dumps(kpi.get("source_fields", [])),
                 1 if kpi.get("reviewed") else 0,
+                kpi.get("aggregation", ""),
             ),
         )
     return get_kpi_by_id(kpi["kpi_id"])

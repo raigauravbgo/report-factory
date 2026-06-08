@@ -114,7 +114,7 @@ def run_interview(
                 interview_result=result,
             )
         except Exception as e:
-            logger.warning(f"ADK failed (falling back to Flow 1 OpenAI): {e}")
+            logger.warning("ADK_FALLBACK upload_id=%d error=%r", body.upload_id, str(e))
 
     # ── Flow 1: OpenAI fallback (always runs if ADK disabled or failed) ────────
     ai_message, step_index, completed, result = ai_interview.run(
@@ -122,6 +122,17 @@ def run_interview(
         history=history,
         profile=profile,
     )
+    if completed:
+        logger.info(
+            "INTERVIEW_DONE upload_id=%d date_col=%r dims=%s granularity=%s filters=%s",
+            body.upload_id,
+            result.date_column if result else None,
+            result.dimensions if result else [],
+            result.granularity if result else None,
+            result.filters if result else [],
+        )
+    else:
+        logger.info("INTERVIEW_TURN upload_id=%d step=%d completed=False", body.upload_id, step_index)
     return InterviewResponse(
         message=ai_message,
         step_index=step_index,
@@ -164,6 +175,8 @@ def create_recipe(
 
     db.commit()
     db.refresh(recipe)
+    logger.info("RECIPE_CREATED recipe_id=%d upload_id=%d kpis=%d client=%s",
+                recipe.id, body.upload_id, len(body.interview_result.kpis), client_id)
     return _recipe_response(recipe)
 
 
@@ -210,4 +223,5 @@ def approve_recipe(
     recipe.approved_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(recipe)
+    logger.info("RECIPE_APPROVED recipe_id=%d approved_by=%r", recipe_id, body.approved_by)
     return _recipe_response(recipe)

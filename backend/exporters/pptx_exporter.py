@@ -247,12 +247,11 @@ def generate_pptx(dashboard_data: dict) -> bytes:
     """
     if MASTER_PATH.exists():
         prs = Presentation(str(MASTER_PATH))
-        layout = prs.slide_layouts[6]
     else:
         prs = Presentation()
         prs.slide_width = W
         prs.slide_height = H
-        layout = prs.slide_layouts[6]
+    layout = prs.slide_layouts[min(6, len(prs.slide_layouts) - 1)]
 
     _add_title_slide(prs, layout, dashboard_data)
 

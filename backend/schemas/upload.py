@@ -40,6 +40,7 @@ class ColumnProfile(BaseModel):
     ] = "dimension"
     grain_score: float = 0.0
     grain_candidate: bool = False
+    is_filter: bool = False
 
 
 class ProfilingResult(BaseModel):
@@ -68,6 +69,7 @@ class ColumnSchemaOverride(BaseModel):
         "entity_key", "time_key", "financial_metric", "dimension", "text", "ignore"
     ]] = None
     in_grain: Optional[bool] = None
+    in_filter: Optional[bool] = None
 
 
 class SaveSchemaOverridesRequest(BaseModel):

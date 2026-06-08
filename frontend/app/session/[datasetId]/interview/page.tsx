@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { logEvent } from "@/lib/logger";
 import type { ChatMessage, InterviewResult } from "@/lib/types";
 
 const MAX_STEPS = 6;
@@ -62,6 +63,18 @@ export default function InterviewPage() {
         setCompleted(true);
         setResult(res.interview_result);
         sessionStorage.setItem(`dataset_${datasetId}_interview`, JSON.stringify(res.interview_result));
+        logEvent("interview_completed", "interview", {
+          total_turns: newHistory.filter((m) => m.role === "user").length,
+          date_column: res.interview_result.date_column,
+          dimensions: res.interview_result.dimensions,
+          granularity: res.interview_result.granularity,
+        }, { datasetId: Number(datasetId) });
+      } else if (userMessage) {
+        logEvent("interview_message_sent", "interview", {
+          step: res.step_index,
+          message_length: userMessage.length,
+          message_preview: userMessage.slice(0, 100),
+        }, { datasetId: Number(datasetId) });
       }
     } catch {
       setHistory((h) => [
@@ -81,6 +94,7 @@ export default function InterviewPage() {
   }
 
   async function handleSkip() {
+    logEvent("interview_skipped", "interview", {}, { datasetId: Number(datasetId) });
     try {
       const result = await api.skipInterview(Number(datasetId));
       sessionStorage.setItem(`dataset_${datasetId}_interview`, JSON.stringify(result));

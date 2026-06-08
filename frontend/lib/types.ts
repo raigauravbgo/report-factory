@@ -53,6 +53,7 @@ export interface ColumnProfile {
   semantic_tag: SemanticTag;
   grain_score: number;
   grain_candidate: boolean;
+  is_filter: boolean;
 }
 
 export interface ProfilingResult {
@@ -74,6 +75,7 @@ export interface ColumnSchemaOverride {
   suggested_role?: ColumnRole;
   semantic_tag?: SemanticTag;
   in_grain?: boolean;
+  in_filter?: boolean;
 }
 
 export interface SaveSchemaOverridesRequest {
@@ -91,9 +93,12 @@ export interface ChatMessage {
 export interface KpiSpec {
   name: string;
   formula: string;
+  aggregation?: string;
+  format?: string;
 }
 
 export interface InterviewResult {
+  domain?: string | null;
   date_column: string;
   kpis: KpiSpec[];
   dimensions: string[];
@@ -126,8 +131,10 @@ export interface KpiSuggestion {
   formula: string;
   confidence: number;
   matched_columns: Record<string, string>;
-  source: "catalog" | "interview";
+  source: "catalog" | "interview" | "ai";
   domain?: string;
+  aggregation?: string;
+  description?: string;
 }
 
 export interface ValidationWarning {

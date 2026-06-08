@@ -73,11 +73,15 @@ export const api = {
   skipInterview: (datasetId: number): Promise<InterviewResult> =>
     request<InterviewResult>(`/session/${datasetId}/interview/skip`, { method: "POST" }),
 
-  getKpiSuggestions: (datasetId: number, uploadIds: number[]): Promise<KpiSuggestion[]> =>
+  getKpiSuggestions: (
+    datasetId: number,
+    uploadIds: number[],
+    interviewAnswers?: object,
+  ): Promise<KpiSuggestion[]> =>
     request<KpiSuggestion[]>(`/session/${datasetId}/kpi-suggestions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ upload_ids: uploadIds }),
+      body: JSON.stringify({ upload_ids: uploadIds, interview_answers: interviewAnswers ?? {} }),
     }),
 
   validateData: (datasetId: number, selectedKpiIds: string[]): Promise<ValidationResult> =>
@@ -89,13 +93,18 @@ export const api = {
 
   generateDashboard: (
     datasetId: number,
-    selectedKpiIds: string[],
+    selectedKpis: KpiSuggestion[],
     confirmedRelationships: unknown[],
+    interviewResult?: InterviewResult | null,
   ): Promise<{ recipe_id: number }> =>
     request<{ recipe_id: number }>(`/session/${datasetId}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selected_kpi_ids: selectedKpiIds, confirmed_relationships: confirmedRelationships }),
+      body: JSON.stringify({
+        selected_kpis: selectedKpis,
+        confirmed_relationships: confirmedRelationships,
+        interview_result: interviewResult ?? {},
+      }),
     }),
 
   // ── Interview (legacy single-file) ─────────────────────────────────────────
@@ -125,5 +134,43 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ approved_by: approvedBy, config }),
+    }),
+
+  updateRecipeConfig: (
+    recipeId: number,
+    patch: Partial<RecipeConfig>,
+  ): Promise<{ status: string; updated: string[]; config: RecipeConfig }> =>
+    request<{ status: string; updated: string[]; config: RecipeConfig }>(
+      `/api/dashboard/${recipeId}/config`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      },
+    ),
+
+  validateConfig: (
+    recipeId: number,
+  ): Promise<{
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+    details: {
+      date_span_days?: number | null;
+      missing_filter_columns?: string[];
+      high_cardinality_filters?: string[];
+      failing_kpi_formulas?: string[];
+    };
+  }> =>
+    request(`/api/dashboard/${recipeId}/validate-config`),
+
+  validateFormula: (
+    recipeId: number,
+    formula: string,
+  ): Promise<{ valid: boolean; preview_value: number | null; error: string | null }> =>
+    request(`/api/dashboard/${recipeId}/validate-formula`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ formula }),
     }),
 };

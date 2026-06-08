@@ -103,15 +103,23 @@ def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
         .str.replace(r"_+", "_", regex=True)
         .str.strip("_")
     )
-    seen: dict[str, int] = {}
+    used: set[str] = set()
+    base_counter: dict[str, int] = {}
     new_cols = []
     for col in df.columns:
-        if col in seen:
-            seen[col] += 1
-            new_cols.append(f"{col}_{seen[col]}")
-        else:
-            seen[col] = 0
+        if col not in used:
+            used.add(col)
             new_cols.append(col)
+        else:
+            # Find the next suffix that doesn't collide with any already-assigned name
+            n = base_counter.get(col, 1)
+            candidate = f"{col}_{n}"
+            while candidate in used:
+                n += 1
+                candidate = f"{col}_{n}"
+            base_counter[col] = n + 1
+            used.add(candidate)
+            new_cols.append(candidate)
     df.columns = pd.Index(new_cols)
     return df
 

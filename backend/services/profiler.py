@@ -91,6 +91,16 @@ def _classify(
     if len(non_null) > 0 and _looks_like_date(series, name, non_null):
         return "date", "date"
 
+    # Detect columns stored as strings in Excel/CSV that actually contain numeric data
+    # (e.g. avg_csat_rating, csat_survey_volume stored as text by the source system).
+    if len(non_null) >= 5:
+        sample = non_null.head(200).astype(str).str.strip().str.replace(",", "", regex=False)
+        coerced = pd.to_numeric(sample, errors="coerce")
+        if coerced.notna().mean() >= 0.85:
+            if unique_count <= 5:
+                return "categorical", "dimension"
+            return "numeric", "measure"
+
     unique_ratio = unique_count / total if total else 0
     if unique_count <= _MAX_DIMENSION_UNIQUES or unique_ratio <= _HIGH_CARDINALITY_RATIO:
         return "categorical", "dimension"
@@ -98,12 +108,32 @@ def _classify(
     return "text", "dimension"
 
 
+_DD_MM_YYYY_RE = re.compile(
+    r"^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$"
+)
+
+
 def _looks_like_date(series: pd.Series, name: str, non_null: pd.Series) -> bool:
+    sample_str = non_null.head(200).astype(str).str.strip()
+
+    # Fast path: name strongly suggests a date column
     if _DATE_NAME_HINTS.search(name):
-        parsed = pd.to_datetime(non_null.astype(str), errors="coerce", format="mixed")
+        # Try dayfirst (DD-MM-YYYY / DD/MM/YYYY) first, then default
+        parsed = pd.to_datetime(sample_str, errors="coerce", dayfirst=True)
+        if parsed.notna().mean() >= 0.5:
+            return True
+        parsed = pd.to_datetime(sample_str, errors="coerce", format="mixed")
         return parsed.notna().mean() >= 0.5
-    sample = non_null.head(200).astype(str)
-    parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
+
+    # Check if values look like DD-MM-YYYY / DD/MM/YYYY by pattern
+    dd_mm_matches = sample_str.str.match(_DD_MM_YYYY_RE).mean()
+    if dd_mm_matches >= 0.8:
+        parsed = pd.to_datetime(sample_str, errors="coerce", dayfirst=True)
+        if parsed.notna().mean() >= _DATE_PARSE_THRESHOLD:
+            return True
+
+    # General parse (YYYY-MM-DD, ISO, mixed)
+    parsed = pd.to_datetime(sample_str, errors="coerce", format="mixed")
     return parsed.notna().mean() >= _DATE_PARSE_THRESHOLD
 
 

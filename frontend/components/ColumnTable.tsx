@@ -6,6 +6,7 @@ interface ColumnOverrideState {
   role?: ColumnRole;
   semanticTag?: SemanticTag;
   inGrain?: boolean;
+  inFilter?: boolean;
 }
 
 interface Props {
@@ -52,6 +53,7 @@ export default function ColumnTable({ columns, overrides, onOverride, grainSugge
             <th className="px-4 py-3 text-left">Role</th>
             <th className="px-4 py-3 text-left">Semantic tag</th>
             <th className="px-4 py-3 text-center">Grain</th>
+            <th className="px-4 py-3 text-center">Filter</th>
             <th className="px-4 py-3 text-right">Missing</th>
             <th className="px-4 py-3 text-right">Unique</th>
             <th className="px-4 py-3 text-left">Sample values</th>
@@ -65,10 +67,12 @@ export default function ColumnTable({ columns, overrides, onOverride, grainSugge
             const grainScore = col.grain_score ?? 0;
             const isAiGrain = grainSuggestions.includes(col.name);
             const inGrain = ov.inGrain !== undefined ? ov.inGrain : (col.grain_candidate || isAiGrain);
+            const inFilter = ov.inFilter !== undefined ? ov.inFilter : (col.is_filter ?? false);
             const isDirty =
               (ov.role !== undefined && ov.role !== col.suggested_role) ||
               (ov.semanticTag !== undefined && ov.semanticTag !== col.semantic_tag) ||
-              (ov.inGrain !== undefined && ov.inGrain !== (col.grain_candidate || isAiGrain));
+              (ov.inGrain !== undefined && ov.inGrain !== (col.grain_candidate || isAiGrain)) ||
+              (ov.inFilter !== undefined && ov.inFilter !== (col.is_filter ?? false));
 
             return (
               <tr key={col.name} className={role === "ignore" ? "opacity-40" : ""}>
@@ -122,6 +126,17 @@ export default function ColumnTable({ columns, overrides, onOverride, grainSugge
                         <span className="text-[9px] text-teal-600 font-medium">AI</span>
                       )}
                     </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex justify-center">
+                    <input
+                      type="checkbox"
+                      checked={inFilter}
+                      onChange={(e) => onOverride(col.name, { inFilter: e.target.checked })}
+                      title="Mark as dashboard filter"
+                      className="h-3.5 w-3.5 rounded accent-[#00B5AD]"
+                    />
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right text-gray-500">

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Brush,
 } from "recharts";
 import { api } from "@/lib/api";
+import { logEvent } from "@/lib/logger";
 import { formatKpiValue, formatAxisValue } from "@/lib/format";
 import KpiSummaryCard from "@/components/kpis/KpiSummaryCard";
 import ChartCard from "@/components/ui/ChartCard";
@@ -15,7 +16,7 @@ import InsightPanel from "@/components/ui/InsightPanel";
 import FilterBar from "@/components/filters/FilterBar";
 import type { RecipeConfig } from "@/lib/types";
 
-interface KpiSummary { name: string; value: number | null; formula: string }
+interface KpiSummary { name: string; value: number | null; formula: string; format?: string }
 interface TimeSeriesPoint { date: string; value: number }
 interface BreakdownPoint { label: string; value: number }
 interface TimeSeries { kpi: string; data: TimeSeriesPoint[] }
@@ -35,6 +36,78 @@ interface DashboardData {
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const COLORS = ["#3b82f6", "#00B5AD", "#f59e0b", "#ef4444", "#8b5cf6"];
 
+// ── TrendChart ──────────────────────────────────────────────────────────────
+// Extracted into its own component so it can own a `chartReady` state.
+// The Brush is only mounted after ResponsiveContainer fires onResize with a
+// positive width — this prevents the Recharts layout store from propagating
+// NaN x/width into the Brush's scale before measurement is complete.
+
+interface TrendChartProps {
+  ts: TimeSeries;
+  formula: string;
+  fmt?: string;
+  color: string;
+  zoom: { start: number; end: number };
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onResetZoom: () => void;
+  onBrushChange: (start: number, end: number) => void;
+}
+
+function TrendChart({ ts, formula, fmt, color, zoom, onZoomIn, onZoomOut, onResetZoom, onBrushChange }: TrendChartProps) {
+  const [chartReady, setChartReady] = useState(false);
+  const readyRef = useRef(false);
+
+  const handleResize = (w: number) => {
+    if (w > 0 && !readyRef.current) {
+      readyRef.current = true;
+      setChartReady(true);
+    }
+  };
+
+  const cleanData = ts.data.map((d) => ({
+    ...d,
+    value: Number.isFinite(d.value) ? d.value : null,
+  }));
+
+  const safeStart = Number.isFinite(zoom.start) ? Math.min(zoom.start, ts.data.length - 1) : 0;
+  const safeEnd   = Number.isFinite(zoom.end)   ? Math.min(zoom.end,   ts.data.length - 1) : ts.data.length - 1;
+
+  return (
+    <>
+      <div className="flex gap-1 justify-end mb-1">
+        <button onClick={onZoomIn} title="Zoom in" className="px-2 py-0.5 rounded text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium">＋</button>
+        <button onClick={onZoomOut} title="Zoom out" className="px-2 py-0.5 rounded text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium">－</button>
+        <button onClick={onResetZoom} title="Reset zoom" className="px-2 py-0.5 rounded text-xs text-gray-400 hover:text-gray-600">Reset</button>
+      </div>
+      <ResponsiveContainer width="100%" height={220} onResize={handleResize}>
+        <LineChart data={cleanData} margin={{ top: 4, right: 8, left: 0, bottom: 40 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+          <XAxis dataKey="date" tick={{ fontSize: 10 }} tickLine={false} />
+          <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => formatAxisValue(v, formula, fmt)} />
+          <Tooltip formatter={(v: unknown) => formatKpiValue(v as number, formula, fmt)} />
+          <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
+          {chartReady && ts.data.length > 2 && (
+            <Brush
+              dataKey="date"
+              height={28}
+              travellerWidth={8}
+              startIndex={safeStart}
+              endIndex={safeEnd}
+              onChange={({ startIndex, endIndex }) =>
+                onBrushChange(
+                  Number.isFinite(startIndex) ? startIndex! : 0,
+                  Number.isFinite(endIndex)   ? endIndex!   : ts.data.length - 1,
+                )
+              }
+            />
+          )}
+        </LineChart>
+      </ResponsiveContainer>
+    </>
+  );
+}
+
 export default function DashboardPage() {
   const { recipeId } = useParams<{ recipeId: string }>();
   const router = useRouter();
@@ -49,6 +122,29 @@ export default function DashboardPage() {
   const [exporting, setExporting] = useState(false);
   const [exportingPptx, setExportingPptx] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
+  const [zoomState, setZoomState] = useState<Record<string, { start: number; end: number }>>({});
+  // Granularity override — null means use recipe default
+  const [activeGranularity, setActiveGranularity] = useState<string | null>(null);
+
+  function getZoom(kpiName: string, dataLength: number) {
+    return zoomState[kpiName] ?? { start: 0, end: Math.max(0, dataLength - 1) };
+  }
+  function zoomIn(kpiName: string, dataLength: number) {
+    const { start, end } = getZoom(kpiName, dataLength);
+    const mid = Math.floor((start + end) / 2);
+    const quarter = Math.max(1, Math.floor((end - start) / 4));
+    setZoomState((z) => ({ ...z, [kpiName]: { start: Math.max(0, mid - quarter), end: Math.min(dataLength - 1, mid + quarter) } }));
+    logEvent("chart_zoomed_in", "dashboard", { kpi: kpiName }, { recipeId: Number(recipeId) });
+  }
+  function zoomOut(kpiName: string, dataLength: number) {
+    const { start, end } = getZoom(kpiName, dataLength);
+    const expand = Math.max(1, Math.floor((end - start) / 2));
+    setZoomState((z) => ({ ...z, [kpiName]: { start: Math.max(0, start - expand), end: Math.min(dataLength - 1, end + expand) } }));
+    logEvent("chart_zoomed_out", "dashboard", { kpi: kpiName }, { recipeId: Number(recipeId) });
+  }
+  function resetZoom(kpiName: string) {
+    setZoomState((z) => { const n = { ...z }; delete n[kpiName]; return n; });
+  }
 
   // Initial load — recipe metadata + filter option values
   useEffect(() => {
@@ -63,10 +159,11 @@ export default function DashboardPage() {
       .catch(() => {});
   }, [recipeId]);
 
-  // Fetch dashboard data — re-runs whenever activeFilters changes
+  // Fetch dashboard data — re-runs whenever activeFilters or activeGranularity changes
   useEffect(() => {
     const params = new URLSearchParams();
     Object.entries(activeFilters).forEach(([k, v]) => { if (v) params.set(k, v); });
+    if (activeGranularity) params.set("granularity", activeGranularity);
     const url = `${BASE_URL}/api/dashboard/${recipeId}/data${params.size ? `?${params}` : ""}`;
 
     setFiltering(true);
@@ -75,8 +172,11 @@ export default function DashboardPage() {
       .then((r) => { if (!r.ok) throw new Error(`API ${r.status}`); return r.json() as Promise<DashboardData>; })
       .then((d) => {
         setData(d);
-        // If initial load (no data yet), clear full-page error too
-        if (!data) setError(null);
+        if (!data) {
+          setError(null);
+          const blankCount = d.kpi_summaries.filter((k) => k.value === null).length;
+          logEvent("dashboard_loaded", "dashboard", { kpi_count: d.kpi_summaries.length, blank_count: blankCount }, { recipeId: Number(recipeId) });
+        }
       })
       .catch((e) => {
         // If we already have data, show inline error instead of full-page crash
@@ -85,13 +185,16 @@ export default function DashboardPage() {
       })
       .finally(() => { setLoading(false); setFiltering(false); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recipeId, activeFilters]);
+  }, [recipeId, activeFilters, activeGranularity]);
 
   function handleFilterChange(key: string, value: string) {
     setActiveFilters((prev) => ({ ...prev, [key]: value }));
+    if (value) logEvent("filter_applied", "dashboard", { filter_key: key, filter_value: value }, { recipeId: Number(recipeId) });
+    else logEvent("filter_cleared", "dashboard", { filter_key: key }, { recipeId: Number(recipeId) });
   }
 
   async function handleExport() {
+    logEvent("export_clicked", "dashboard", { format: "excel" }, { recipeId: Number(recipeId) });
     setExporting(true);
     try {
       const res = await fetch(`${BASE_URL}/api/dashboard/${recipeId}/export/excel`);
@@ -108,6 +211,7 @@ export default function DashboardPage() {
   }
 
   async function handleExportPptx() {
+    logEvent("export_clicked", "dashboard", { format: "pptx" }, { recipeId: Number(recipeId) });
     setExportingPptx(true);
     try {
       const res = await fetch(`${BASE_URL}/api/dashboard/${recipeId}/export/pptx`);
@@ -157,7 +261,29 @@ export default function DashboardPage() {
             <span className="ml-2 text-gray-300">· Updated {new Date(generated_at).toLocaleTimeString()}</span>
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Granularity toggle */}
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+            {(["daily", "weekly", "monthly"] as const).map((g) => {
+              const current = activeGranularity ?? data?.config?.granularity ?? "monthly";
+              return (
+                <button
+                  key={g}
+                  onClick={() => {
+                    setActiveGranularity(g === data?.config?.granularity && !activeGranularity ? null : g);
+                    logEvent("granularity_changed", "dashboard", { granularity: g }, { recipeId: Number(recipeId) });
+                  }}
+                  className={`px-3 py-1.5 capitalize transition-colors ${
+                    current === g
+                      ? "bg-[#1B2340] text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  {g}
+                </button>
+              );
+            })}
+          </div>
           <button
             onClick={handleExportPptx}
             disabled={exportingPptx}
@@ -212,7 +338,7 @@ export default function DashboardPage() {
             <div className="text-4xl text-gray-200">◎</div>
             <p className="text-sm font-medium text-gray-500">No data matches the selected filters.</p>
             <button
-              onClick={() => setActiveFilters({})}
+              onClick={() => { setActiveFilters({}); logEvent("filters_cleared", "dashboard", {}, { recipeId: Number(recipeId) }); }}
               className="text-sm text-[#00B5AD] underline"
             >
               Clear filters
@@ -228,7 +354,7 @@ export default function DashboardPage() {
               <KpiSummaryCard
                 key={kpi.name}
                 label={kpi.name.replace(/_/g, " ")}
-                value={formatKpiValue(kpi.value, kpi.formula)}
+                value={formatKpiValue(kpi.value, kpi.formula, kpi.format)}
                 formula={kpi.formula}
                 color={COLORS[i % COLORS.length]}
               />
@@ -251,13 +377,14 @@ export default function DashboardPage() {
               {time_series.map((ts, i) => {
                 const kpi = kpi_summaries.find((k) => k.name === ts.kpi);
                 const formula = kpi?.formula ?? "";
+                const fmt = kpi?.format;
                 const takeaway = ts.data.length > 1
                   ? (() => {
                       const first = ts.data[0]?.value ?? 0;
                       const last = ts.data[ts.data.length - 1]?.value ?? 0;
                       const diff = last - first;
                       const dir = diff > 0 ? "increased" : diff < 0 ? "decreased" : "remained stable";
-                      return `${ts.kpi.replace(/_/g, " ")} ${dir} from ${formatKpiValue(first, formula)} to ${formatKpiValue(last, formula)} over the period.`;
+                      return `${ts.kpi.replace(/_/g, " ")} ${dir} from ${formatKpiValue(first, formula, fmt)} to ${formatKpiValue(last, formula, fmt)} over the period.`;
                     })()
                   : undefined;
 
@@ -268,30 +395,26 @@ export default function DashboardPage() {
                     subtitle={`${config.granularity} · ${ts.data.length} periods`}
                     takeaway={takeaway}
                   >
-                    {ts.data.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={200}>
-                        <LineChart data={ts.data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                          <XAxis dataKey="date" tick={{ fontSize: 10 }} tickLine={false} />
-                          <YAxis
-                            tick={{ fontSize: 10 }}
-                            tickLine={false}
-                            axisLine={false}
-                            tickFormatter={(v) => formatAxisValue(v, formula)}
-                          />
-                          <Tooltip formatter={(v: unknown) => formatKpiValue(v as number, formula)} />
-                          <Line
-                            type="monotone"
-                            dataKey="value"
-                            stroke={COLORS[i % COLORS.length]}
-                            strokeWidth={2.5}
-                            dot={false}
-                            activeDot={{ r: 4 }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
+                    {ts.data.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-8 text-center">No time series data. Try switching to Daily or Weekly granularity.</p>
+                    ) : ts.data.length === 1 ? (
+                      <p className="text-sm text-gray-400 py-8 text-center">
+                        Only 1 period of data — switch to <strong>Daily</strong> or <strong>Weekly</strong> for a trend view.
+                      </p>
                     ) : (
-                      <p className="text-sm text-gray-400 py-8 text-center">No time series data available.</p>
+                      <TrendChart
+                        ts={ts}
+                        formula={formula}
+                        fmt={fmt}
+                        color={COLORS[i % COLORS.length]}
+                        zoom={getZoom(ts.kpi, ts.data.length)}
+                        onZoomIn={() => zoomIn(ts.kpi, ts.data.length)}
+                        onZoomOut={() => zoomOut(ts.kpi, ts.data.length)}
+                        onResetZoom={() => resetZoom(ts.kpi)}
+                        onBrushChange={(start, end) =>
+                          setZoomState((z) => ({ ...z, [ts.kpi]: { start, end } }))
+                        }
+                      />
                     )}
                   </ChartCard>
                 );
@@ -325,7 +448,7 @@ export default function DashboardPage() {
                   >
                     {bk.data.length > 0 ? (
                       <ResponsiveContainer width="100%" height={200}>
-                        <BarChart data={bk.data} margin={{ top: 4, right: 8, left: 0, bottom: 36 }}>
+                        <BarChart data={bk.data.map((d) => ({ ...d, value: Number.isFinite(d.value) ? d.value : 0 }))} margin={{ top: 4, right: 8, left: 0, bottom: 36 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                           <XAxis
                             dataKey="label"
@@ -342,7 +465,7 @@ export default function DashboardPage() {
                             tickFormatter={(v) => formatAxisValue(v, formula)}
                           />
                           <Tooltip formatter={(v: unknown) => formatKpiValue(v as number, formula)} />
-                          <Bar dataKey="value" fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                          <Bar dataKey="value" fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} maxBarSize={40} isAnimationActive={false} />
                         </BarChart>
                       </ResponsiveContainer>
                     ) : (

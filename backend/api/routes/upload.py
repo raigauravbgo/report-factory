@@ -1,7 +1,11 @@
 import io
+import logging
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from core.config import settings
 from core.database import get_db
@@ -43,6 +47,7 @@ async def upload_file(
     upload = _create_upload(db, client_id, dataset.id, filename, contents)
     db.commit()
     db.refresh(upload)
+    logger.info("FILE_UPLOAD upload_id=%d file=%r size=%.1fKB client=%s", upload.id, filename, len(contents) / 1024, client_id)
     background_tasks.add_task(_parse_and_profile, upload.id, upload.s3_key, client_id)
     return upload
 
@@ -72,9 +77,12 @@ async def upload_batch(
         upload = _create_upload(db, client_id, dataset.id, filename, contents)
         db.flush()
         items.append(BatchUploadItem(upload_id=upload.id, filename=filename, status="pending"))
+        logger.info("FILE_UPLOAD upload_id=%d file=%r size=%.1fKB dataset_id=%d client=%s",
+                    upload.id, filename, len(contents) / 1024, dataset.id, client_id)
         background_tasks.add_task(_parse_and_profile, upload.id, upload.s3_key, client_id)
 
     db.commit()
+    logger.info("BATCH_UPLOAD dataset_id=%d files=%d client=%s", dataset.id, len(items), client_id)
     return BatchUploadResponse(dataset_id=dataset.id, uploads=items)
 
 
@@ -122,16 +130,47 @@ def save_schema_overrides(
     db: Session = Depends(get_db),
     client_id: str = Depends(_get_client_id),
 ):
-    """Persist user edits to column roles, semantic tags, and grain selections."""
-    staging = (
-        db.query(StagingTable)
-        .join(Upload)
-        .filter(StagingTable.upload_id == upload_id, Upload.client_id == client_id)
-        .first()
-    )
+    """Persist user edits to column roles, semantic tags, and grain selections.
+
+    When active_sheet changes on a multi-sheet Excel file the staging table is
+    rebuilt from the new sheet so that dashboard computation uses the correct data.
+    """
+    upload = db.query(Upload).filter(Upload.id == upload_id, Upload.client_id == client_id).first()
+    if not upload:
+        raise HTTPException(404, "Upload not found.")
+
+    staging = db.query(StagingTable).filter(StagingTable.upload_id == upload_id).first()
     if not staging or not staging.profile_data:
         raise HTTPException(404, "Profile not found.")
 
+    # Re-parse when the active sheet changes so staging data matches the selected sheet
+    if body.active_sheet is not None and body.active_sheet != staging.active_sheet:
+        try:
+            t0 = time.perf_counter()
+            parse_result = parser.parse_upload(upload_id, upload.s3_key, db, active_sheet=body.active_sheet)
+            result = profiler.profile(parse_result.df, upload_id)
+            result.encoding = parse_result.encoding
+            result.delimiter = parse_result.delimiter
+            result.sheet_names = parse_result.sheet_names
+            result.active_sheet = parse_result.active_sheet
+
+            profile_data = result.model_dump()
+            staging.profile_data = profile_data
+            staging.active_sheet = parse_result.active_sheet
+            staging.row_count = result.row_count
+            staging.column_count = len(result.columns)
+            staging.duplicate_row_count = result.duplicate_row_count
+            staging.grain_columns = result.grain_suggestions
+            db.commit()
+            logger.info(
+                "SHEET_REPARSE upload_id=%d sheet=%r rows=%d duration=%.2fs",
+                upload_id, parse_result.active_sheet, result.row_count, time.perf_counter() - t0,
+            )
+        except Exception as exc:
+            logger.error("SHEET_REPARSE_FAIL upload_id=%d sheet=%r error=%r", upload_id, body.active_sheet, str(exc))
+            raise HTTPException(500, f"Failed to re-parse sheet '{body.active_sheet}': {exc}")
+
+    # Apply any column role/tag overrides on top of (possibly refreshed) profile
     profile_data = dict(staging.profile_data)
     override_map = {o.name: o for o in body.column_overrides}
 
@@ -146,12 +185,9 @@ def save_schema_overrides(
                 col["semantic_tag"] = ov.semantic_tag
             if ov.in_grain is not None:
                 col["grain_candidate"] = ov.in_grain
+            if ov.in_filter is not None:
+                col["is_filter"] = ov.in_filter
 
-    if body.active_sheet is not None:
-        profile_data["active_sheet"] = body.active_sheet
-        staging.active_sheet = body.active_sheet
-
-    # Update grain_columns on staging record for relationship detection
     grain_cols = [c["name"] for c in profile_data.get("columns", []) if c.get("grain_candidate")]
     staging.grain_columns = grain_cols
     staging.profile_data = profile_data
@@ -188,6 +224,7 @@ def _parse_and_profile(upload_id: int, s3_key: str, client_id: str) -> None:
     from core.database import SessionLocal
 
     db = SessionLocal()
+    t0 = time.perf_counter()
     try:
         upload = db.query(Upload).filter(Upload.id == upload_id).first()
         if not upload:
@@ -195,6 +232,7 @@ def _parse_and_profile(upload_id: int, s3_key: str, client_id: str) -> None:
 
         upload.status = "profiling"
         db.commit()
+        logger.info("PROFILING_START upload_id=%d file=%r", upload_id, upload.filename)
 
         parse_result = parser.parse_upload(upload_id, s3_key, db)
         result = profiler.profile(parse_result.df, upload_id)
@@ -222,9 +260,15 @@ def _parse_and_profile(upload_id: int, s3_key: str, client_id: str) -> None:
         db.add(staging)
         upload.status = "profiled"
         db.commit()
+        logger.info(
+            "PROFILING_DONE upload_id=%d rows=%d cols=%d dupes=%d duration=%.2fs",
+            upload_id, result.row_count, len(result.columns),
+            result.duplicate_row_count, time.perf_counter() - t0,
+        )
 
     except Exception as exc:
         db.rollback()
+        logger.error("PROFILING_FAIL upload_id=%d error=%r", upload_id, str(exc))
         upload = db.query(Upload).filter(Upload.id == upload_id).first()
         if upload:
             upload.status = "failed"
