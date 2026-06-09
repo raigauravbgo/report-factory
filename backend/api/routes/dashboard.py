@@ -116,6 +116,15 @@ def get_dashboard_filter_values(recipe_id: int, db: Session = Depends(get_db)):
         ]
         candidate_cols = filtered if filtered else candidate_cols
 
+    # Cap dimension-fallback columns at 5 by unique_count ascending (lowest cardinality = most
+    # useful for filtering). Only applies when no explicit filter columns are configured —
+    # user-chosen filters are never capped.
+    if not filter_cols and len(candidate_cols) > 5:
+        def _unique_count(col_name: str) -> int:
+            return int(all_col_meta.get(col_name, {}).get("unique_count", 999))
+        candidate_cols = sorted(candidate_cols, key=_unique_count)[:5]
+        logger.debug("FILTER_BAR_CAP recipe_id=%d capped_dims=%s", recipe_id, candidate_cols)
+
     try:
         options = get_filter_options(all_table_names, candidate_cols)
     except Exception as e:
