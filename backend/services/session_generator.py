@@ -219,11 +219,14 @@ def _build_chart_layout(sections: list[dict], dimensions: list[str]) -> list[dic
                 layout.append({"type": "line", "kpi": kpi_name, "title": kpi_name.replace("_", " ").title()})
             else:
                 layout.append({"type": chart_type, "kpi": kpi_name, "title": kpi_name.replace("_", " ").title()})
+            # Generate one breakdown tile per selected dimension (not just dimensions[0]).
+            # compute_dashboard() uses config["dimensions"] directly to populate these charts.
             if dimensions and chart_type in ("bar", "line"):
-                layout.append({
-                    "type": "bar",
-                    "kpi": kpi_name,
-                    "title": f"{kpi_name.replace('_', ' ').title()} by {dimensions[0]}",
-                    "group_by": dimensions[0],
-                })
+                for dim in dimensions:
+                    layout.append({
+                        "type": "bar",
+                        "kpi": kpi_name,
+                        "title": f"{kpi_name.replace('_', ' ').title()} by {dim}",
+                        "group_by": dim,
+                    })
     return layout

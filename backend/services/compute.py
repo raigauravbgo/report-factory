@@ -649,13 +649,20 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
     time_series: list[dict] = []
     breakdown: list[dict] = []
 
-    # Pre-compute once: df_reset and dimension candidates sorted by cardinality.
-    # Scans ALL dataframe columns (not just recipe dimensions) so that columns like
-    # "supervisor" are discovered even when not listed as recipe dimensions.
-    # Recipe dimensions are ranked first; all others follow, sorted by cardinality.
+    # Pre-compute once: df_reset and dimension candidates.
+    # When the recipe has explicit user-selected dimensions (set on the Dimensions page),
+    # use those exclusively so charts match what the user picked.
+    # Fall back to scanning all non-numeric low-cardinality columns when no dims configured.
     from services.ai_interview import _is_bad_filter_col as _bad_col  # inline to avoid circular import
     df_reset = df.reset_index() if date_col else df
-    _breakdown_candidates = sorted(
+
+    _config_dims = [
+        d for d in (recipe_config.get("dimensions") or [])
+        if d in df_reset.columns
+        and not pd.api.types.is_numeric_dtype(df_reset[d])
+        and 2 <= df_reset[d].nunique() <= 50
+    ]
+    _breakdown_candidates = _config_dims if _config_dims else sorted(
         [
             c for c in df_reset.columns
             if not _bad_col(c)
@@ -743,10 +750,10 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
                 ],
             })
 
-        # Breakdown: try each candidate dimension in cardinality order, use the first
-        # that yields ≥1 non-null group for this KPI's formula.
-        grouped = pd.Series(dtype=float)
-        chosen_dim: str | None = None
+        # Breakdown: generate one chart entry per viable dimension.
+        # User-selected dims (_config_dims): iterate all of them — no break — so every
+        # selected dimension gets its own breakdown chart for this KPI.
+        # Fallback auto-dims: break after the first viable dim (legacy behaviour).
         for _dim in _breakdown_candidates:
             if is_ros:
                 _fp = [p.strip() for p in formula.split("/", 1)]
@@ -767,19 +774,17 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
                     else _eval_formula(g, _f).sum(),
                 ).dropna()
             if not grouped.empty:
-                chosen_dim = _dim
-                break
-
-        if chosen_dim is not None and not grouped.empty:
-            breakdown.append({
-                "kpi": name,
-                "dimension": chosen_dim,
-                "data": [
-                    {"label": str(k), "value": round(float(v), 4)}
-                    for k, v in grouped.items()
-                    if pd.notna(v)
-                ][:20],  # cap at 20 groups
-            })
+                breakdown.append({
+                    "kpi": name,
+                    "dimension": _dim,
+                    "data": [
+                        {"label": str(k), "value": round(float(v), 4)}
+                        for k, v in grouped.items()
+                        if pd.notna(v)
+                    ][:20],  # cap at 20 groups
+                })
+                if not _config_dims:
+                    break  # fallback: stop after first viable dim per KPI
 
     insights = _generate_insights(kpi_summaries, time_series)
 
