@@ -1,6 +1,7 @@
 import type {
   BatchUploadResponse,
   ChatMessage,
+  DimensionColumn,
   InterviewResponse,
   InterviewResult,
   KpiSuggestion,
@@ -93,6 +94,9 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ upload_ids: uploadIds, interview_answers: interviewAnswers ?? {} }),
     }),
+
+  getDimensions: (datasetId: number): Promise<DimensionColumn[]> =>
+    request<DimensionColumn[]>(`/session/${datasetId}/dimensions`),
 
   validateData: (datasetId: number, selectedKpiIds: string[]): Promise<ValidationResult> =>
     request<ValidationResult>(`/session/${datasetId}/validate`, {

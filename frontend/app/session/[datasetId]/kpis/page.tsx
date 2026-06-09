@@ -31,8 +31,6 @@ export default function KpisPage() {
   const [commentOpen, setCommentOpen] = useState<string | null>(null);
   const [customName, setCustomName] = useState("");
   const [customFormula, setCustomFormula] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
   const [kpiError, setKpiError] = useState<string | null>(null);
   const [addingCustom, setAddingCustom] = useState(false);
   // C5: Use retryCount to re-trigger the fetch without reloading the page
@@ -134,38 +132,14 @@ export default function KpisPage() {
     dragOver.current = null;
   };
 
-  async function handleGenerate() {
+  function handleContinue() {
     if (selected.length === 0) return;
-    setGenerating(true);
-    setGenerateError(null);
-    try {
-      const confirmedRel = (() => {
-        try {
-          const raw = sessionStorage.getItem(`dataset_${datasetId}_relationships`);
-          return raw ? JSON.parse(raw) : [];
-        } catch { return []; }
-      })();
-      const interviewResult = (() => {
-        try {
-          const raw = sessionStorage.getItem(`dataset_${datasetId}_interview`);
-          return raw ? JSON.parse(raw) : {};
-        } catch { return {}; }
-      })();
-      logEvent("generate_dashboard_clicked", "kpis", {
-        kpi_count: selected.length,
-        kpi_ids: selected.map((k) => k.kpi_id),
-      }, { datasetId: Number(datasetId) });
-      const res = await api.generateDashboard(
-        Number(datasetId),
-        selected,
-        confirmedRel,
-        interviewResult,
-      );
-      router.push(`/dashboard/${res.recipe_id}`);
-    } catch (e) {
-      setGenerateError(String(e));
-      setGenerating(false);
-    }
+    sessionStorage.setItem(`dataset_${datasetId}_selected_kpis`, JSON.stringify(selected));
+    logEvent("kpis_confirmed", "kpis", {
+      kpi_count: selected.length,
+      kpi_ids: selected.map((k) => k.kpi_id),
+    }, { datasetId: Number(datasetId) });
+    router.push(`/session/${datasetId}/dimensions`);
   }
 
   return (
@@ -376,19 +350,14 @@ export default function KpisPage() {
               )}
             </div>
 
-            {/* Generate button */}
-            <div className="border-t border-gray-100 p-4 bg-white space-y-2">
-              {generateError && (
-                <p className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 break-words">
-                  {generateError}
-                </p>
-              )}
+            {/* Continue button */}
+            <div className="border-t border-gray-100 p-4 bg-white">
               <button
-                onClick={handleGenerate}
-                disabled={selected.length === 0 || generating}
+                onClick={handleContinue}
+                disabled={selected.length === 0}
                 className="w-full py-2.5 rounded-xl text-sm font-medium bg-[#1B2340] text-white hover:bg-[#243060] disabled:opacity-40 transition-colors"
               >
-                {generating ? "Generating…" : `Generate Dashboard (${selected.length} KPIs)`}
+                {`Continue to Dimensions (${selected.length} KPIs) →`}
               </button>
             </div>
           </div>

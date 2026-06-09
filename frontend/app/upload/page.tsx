@@ -28,7 +28,7 @@ const STATUS_COLOR: Record<UploadStatus, string> = {
   failed: "bg-red-50 text-red-600",
 };
 
-const STEPS = ["Upload", "Schema", "Interview", "KPIs", "Dashboard"];
+const STEPS = ["Upload", "Schema", "Interview", "KPIs", "Dimensions", "Dashboard"];
 
 export default function UploadPage() {
   const router = useRouter();

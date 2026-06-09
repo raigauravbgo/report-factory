@@ -23,7 +23,7 @@ interface FileTab {
   saved: boolean;
 }
 
-const STEPS = ["Upload", "Schema", "Interview", "KPIs", "Dashboard"];
+const STEPS = ["Upload", "Schema", "Interview", "KPIs", "Dimensions", "Dashboard"];
 
 export default function SchemaPage() {
   const { datasetId } = useParams<{ datasetId: string }>();

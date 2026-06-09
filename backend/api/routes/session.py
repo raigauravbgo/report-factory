@@ -6,6 +6,7 @@ POST /session/{dataset_id}/interview          Flow 1 hybrid interview
 GET  /session/{dataset_id}/interview/state    current step + collected answers
 POST /session/{dataset_id}/interview/skip     skip interview, return default InterviewResult
 POST /session/{dataset_id}/kpi-suggestions    suggest KPIs from catalog + interview
+GET  /session/{dataset_id}/dimensions         list dimension columns across all uploaded files
 POST /session/{dataset_id}/validate           pre-dashboard data validation
 POST /session/{dataset_id}/generate           create recipe + return recipe_id
 """
@@ -153,6 +154,53 @@ def kpi_suggestions(dataset_id: int, body: KpiSuggestRequest, db: Session = Depe
     except Exception as exc:
         logger.error("kpi_suggestions: unexpected error dataset_id=%d: %s", dataset_id, exc)
         return []
+
+
+# ── Dimensions ───────────────────────────────────────────────────────────────
+
+class DimensionColumn(BaseModel):
+    name: str
+    source_file: str
+    semantic_tag: str | None = None
+    unique_count: int
+    sample_values: list[str] = []
+
+
+@router.get("/{dataset_id}/dimensions", response_model=list[DimensionColumn])
+def get_dimensions(dataset_id: int, db: Session = Depends(get_db)):
+    """Aggregate dimension columns from all uploads in the dataset.
+
+    A column qualifies when suggested_role == "dimension" and semantic_tag is not
+    entity_key, time_key, or financial_metric. Columns are deduplicated by name
+    (last file wins on collision).
+    """
+    staging_rows = (
+        db.query(StagingTable)
+        .join(Upload, StagingTable.upload_id == Upload.id)
+        .filter(Upload.dataset_id == dataset_id)
+        .all()
+    )
+    seen: dict[str, DimensionColumn] = {}
+    for st in staging_rows:
+        if not st.profile_data:
+            continue
+        source_file = st.upload.filename
+        for col in st.profile_data.get("columns", []):
+            role = col.get("suggested_role", "")
+            tag = col.get("semantic_tag", "")
+            if role != "dimension":
+                continue
+            if tag in ("entity_key", "time_key", "financial_metric"):
+                continue
+            samples = [str(v) for v in (col.get("sample_values") or [])[:5]]
+            seen[col["name"]] = DimensionColumn(
+                name=col["name"],
+                source_file=source_file,
+                semantic_tag=tag or None,
+                unique_count=col.get("unique_count", 0),
+                sample_values=samples,
+            )
+    return list(seen.values())
 
 
 # ── Validation ────────────────────────────────────────────────────────────────

@@ -137,6 +137,14 @@ export interface KpiSuggestion {
   description?: string;
 }
 
+export interface DimensionColumn {
+  name: string;
+  source_file: string;
+  semantic_tag: string | null;
+  unique_count: number;
+  sample_values: string[];
+}
+
 export interface ValidationWarning {
   severity: "error" | "warning";
   column: string;
