@@ -277,7 +277,15 @@ def _enrich_dfs(
                 )
                 continue
 
-            lookup_cols_donor = ([cross_rename] if cross_rename else [join_key]) + cols_to_add
+            # Exclude cross_rename from cols_to_add to prevent duplicate columns.
+            # When the donor join key column (e.g. Roster.email) is also a requested
+            # filter column (e.g. recipe dimension "email"), it would appear twice in
+            # lookup_cols_donor: once as the explicit join key and once via cols_to_add.
+            # pandas df[[col, col, ...]] returns a DataFrame with two identically-named
+            # columns, and after rename both become join_key — lookup[join_key].dtype
+            # then raises AttributeError because it returns a DataFrame not a Series.
+            safe_cols_to_add = [c for c in cols_to_add if c != cross_rename]
+            lookup_cols_donor = ([cross_rename] if cross_rename else [join_key]) + safe_cols_to_add
             lookup = donor[[c for c in lookup_cols_donor if c in donor.columns]].drop_duplicates(
                 subset=[cross_rename if cross_rename else join_key]
             ).copy()
@@ -288,6 +296,11 @@ def _enrich_dfs(
                 left_df[join_key] = left_df[join_key].astype(str)
                 lookup[join_key] = lookup[join_key].astype(str)
             enriched[i] = left_df.merge(lookup, on=join_key, how="left", suffixes=("", "_enr"))
+            # If the donor join key was itself a requested filter column (e.g. "email"),
+            # create an alias on the enriched table so that filters on that column name work.
+            # The join key column on left_df (e.g. "affirm_email") holds the same values.
+            if cross_rename and cross_rename in cols_to_add and cross_rename not in enriched[i].columns:
+                enriched[i][cross_rename] = enriched[i][join_key]
             logger.info(
                 "ENRICH table=%s cols=%s via join_key=%s from donor index %d",
                 table_names[i], cols_to_add, join_key, donor_j,
@@ -376,61 +389,108 @@ def _apply_relationships(
     # table_name → DataFrame lookup
     table_df_map: dict[str, pd.DataFrame] = dict(zip(table_names, dfs))
 
-    # Collect pk_fk join instructions (skip non-pk_fk relationship types)
+    # Collect pk_fk join instructions (skip non-pk_fk relationship types).
+    # For each candidate, cardinality ratios determine:
+    #   1. Whether either side is a valid PK (ratio >= 0.5).  If max(ratio_a, ratio_b)
+    #      is below 0.5, both columns are low-cardinality (e.g. date, category) and
+    #      joining them would produce a many-to-many cartesian explosion — skip.
+    #   2. Which side is the PK/dimension (higher ratio).  The stored file_a/file_b
+    #      ordering is not always correct (schema_relationships may have emitted the
+    #      pair in alphabetical or detection order), so we auto-correct direction.
     pk_fk_joins: list[dict] = []
     for rel in confirmed_relationships:
         if rel.get("relationship_type") != "pk_fk":
             continue
-        tbl_a = upload_table_map.get(rel.get("file_a", ""))  # PK/dimension side
-        tbl_b = upload_table_map.get(rel.get("file_b", ""))  # FK/fact side
+        tbl_a = upload_table_map.get(rel.get("file_a", ""))
+        tbl_b = upload_table_map.get(rel.get("file_b", ""))
         col_a = rel.get("col_a", "")
         col_b = rel.get("col_b", "")
-        if tbl_a and tbl_b and col_a and col_b and tbl_a in table_df_map and tbl_b in table_df_map:
-            pk_fk_joins.append({"fact": tbl_b, "dim": tbl_a, "fact_col": col_b, "dim_col": col_a})
+        if not (tbl_a and tbl_b and col_a and col_b
+                and tbl_a in table_df_map and tbl_b in table_df_map):
+            continue
+
+        df_a = table_df_map[tbl_a]
+        df_b = table_df_map[tbl_b]
+        ratio_a = (df_a[col_a].nunique() / max(len(df_a), 1)
+                   if col_a in df_a.columns else 0.0)
+        ratio_b = (df_b[col_b].nunique() / max(len(df_b), 1)
+                   if col_b in df_b.columns else 0.0)
+
+        # Neither side is unique enough to be a PK → same-grain columns (e.g. date,
+        # location, day-of-week).  Joining would create a cartesian explosion; skip.
+        if max(ratio_a, ratio_b) < 0.5:
             logger.info(
-                "RELATIONSHIP_JOIN fact=%s.%s FK→PK=%s.%s",
-                tbl_b, col_b, tbl_a, col_a,
+                "SKIP_FK_JOIN %s.%s(ratio=%.3f) ↔ %s.%s(ratio=%.3f): "
+                "max cardinality ratio %.3f < 0.5 — treating as same-grain (concat, not join).",
+                tbl_a, col_a, ratio_a, tbl_b, col_b, ratio_b, max(ratio_a, ratio_b),
             )
+            continue
+
+        # The higher-ratio side is the PK/dimension; auto-correct stored direction.
+        if ratio_a >= ratio_b:
+            fact_t, dim_t, fact_c, dim_c = tbl_b, tbl_a, col_b, col_a
+        else:
+            logger.info(
+                "FLIP_FK_JOIN %s.%s(ratio=%.3f) < %s.%s(ratio=%.3f): "
+                "stored file_a has lower cardinality — flipping so higher side is dimension.",
+                tbl_a, col_a, ratio_a, tbl_b, col_b, ratio_b,
+            )
+            fact_t, dim_t, fact_c, dim_c = tbl_a, tbl_b, col_a, col_b
+
+        pk_fk_joins.append({"fact": fact_t, "dim": dim_t, "fact_col": fact_c, "dim_col": dim_c})
+        logger.info(
+            "RELATIONSHIP_JOIN fact=%s.%s FK→PK=%s.%s",
+            fact_t, fact_c, dim_t, dim_c,
+        )
 
     if not pk_fk_joins:
         # No valid pk_fk relationships resolved — fall back to concat
         logger.info("_apply_relationships: no pk_fk joins resolved, falling back to concat")
         return pd.concat(dfs, ignore_index=True, sort=False)
 
-    # Determine the primary fact table (first pk_fk join's fact side)
-    fact_name = pk_fk_joins[0]["fact"]
-    result = table_df_map[fact_name].copy()
-    joined: set[str] = {fact_name}
-
+    # Group joins by fact table so every fact table gets its own dimension join.
+    # The old single-fact approach only joined pk_fk_joins[0]["fact"], leaving
+    # every other fact table in the concat remainder without dimension columns.
+    fact_joins: dict[str, list[dict]] = {}
     for join in pk_fk_joins:
-        if join["fact"] != fact_name:
-            continue  # multi-hop joins deferred to concat fallback below
-        dim_name = join["dim"]
-        if dim_name in joined or dim_name not in table_df_map:
-            continue
-        dim_df = table_df_map[dim_name]
-        # Only bring in columns the fact table doesn't already have (avoid duplicates).
-        new_cols = [c for c in dim_df.columns if c != join["dim_col"] and c not in result.columns]
-        merge_df = dim_df[[join["dim_col"]] + new_cols]
-        result = result.merge(
-            merge_df,
-            left_on=join["fact_col"],
-            right_on=join["dim_col"],
-            how="left",
-            suffixes=("", f"_{dim_name}"),
-        )
-        joined.add(dim_name)
-        logger.info(
-            "RELATIONSHIP_JOIN merged dim=%s (%d new cols) into fact=%s → %d rows",
-            dim_name, len(new_cols), fact_name, len(result),
-        )
+        fact_joins.setdefault(join["fact"], []).append(join)
 
-    # Any table not covered by a pk_fk join is stacked (same-grain concat).
-    remaining = [df for name, df in table_df_map.items() if name not in joined]
-    if remaining:
-        result = pd.concat([result] + remaining, ignore_index=True, sort=False)
+    enriched_facts: list[pd.DataFrame] = []
+    all_joined: set[str] = set()
 
-    return result
+    for fact_tbl, joins in fact_joins.items():
+        fact_df = table_df_map[fact_tbl].copy()
+        joined_dims: set[str] = set()
+        for join in joins:
+            dim_name = join["dim"]
+            if dim_name in joined_dims or dim_name not in table_df_map:
+                continue
+            dim_df = table_df_map[dim_name]
+            # Only bring in columns the fact table doesn't already have (avoid duplicates).
+            new_cols = [c for c in dim_df.columns if c != join["dim_col"] and c not in fact_df.columns]
+            merge_df = dim_df[[join["dim_col"]] + new_cols]
+            fact_df = fact_df.merge(
+                merge_df,
+                left_on=join["fact_col"],
+                right_on=join["dim_col"],
+                how="left",
+                suffixes=("", f"_{dim_name}"),
+            )
+            joined_dims.add(dim_name)
+            logger.info(
+                "RELATIONSHIP_JOIN merged dim=%s (%d new cols) into fact=%s → %d rows",
+                dim_name, len(new_cols), fact_tbl, len(fact_df),
+            )
+        enriched_facts.append(fact_df)
+        all_joined.add(fact_tbl)
+        all_joined.update(joined_dims)
+
+    # Any table not covered by any pk_fk join is stacked (same-grain concat).
+    remaining = [df for name, df in table_df_map.items() if name not in all_joined]
+    all_dfs = enriched_facts + remaining
+    if len(all_dfs) == 1:
+        return all_dfs[0]
+    return pd.concat(all_dfs, ignore_index=True, sort=False)
 
 
 _EXCEL_EPOCH = pd.Timestamp("1899-12-30")

@@ -685,3 +685,322 @@ def test_enrich_pass2_transitive_via_sibling():
     assert qa_enriched["one_up_manager"].notna().all(), (
         "Every QA row must have one_up_manager populated after pass-2 enrichment"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests 20-22 — Fix A: _apply_relationships must join ALL fact tables, not just first
+# ---------------------------------------------------------------------------
+
+def _make_star_schema_fixtures():
+    """Return (dfs, names, upload_table_map, confirmed_relationships) for a
+    3-fact / 1-dimension star schema.
+
+    Roster is the dimension (PK side).  QA, CSAT, Adherence are the three fact tables.
+    All three share agent_email with Roster.
+    """
+    agents = [f"u{i}@x.com" for i in range(5)]
+    dates  = list(pd.date_range("2026-01-01", periods=5))
+
+    df_roster = pd.DataFrame({
+        "agent_email": agents,
+        "location": ["Gurgaon", "Manila", "Heredia", "Gurgaon", "Manila"],
+        "supervisor": ["S1", "S2", "S3", "S1", "S2"],
+    })
+    df_qa = pd.DataFrame({
+        "agent_email": agents,
+        "rubric_score": [85.0, 90.0, 78.0, 88.0, 92.0],
+        "date": dates,
+    })
+    df_csat = pd.DataFrame({
+        "agent_email": agents,
+        "avg_csat_rating": [4.5, 3.8, 4.1, 4.3, 3.9],
+        "date": dates,
+    })
+    df_adherence = pd.DataFrame({
+        "agent_email": agents,
+        "min_in_adherence": [95.0, 88.0, 91.0, 93.0, 87.0],
+        "date": dates,
+    })
+
+    dfs   = [df_roster, df_qa, df_csat, df_adherence]
+    names = ["staging_roster", "staging_qa", "staging_csat", "staging_adherence"]
+
+    upload_table_map = {
+        "Roster.xlsx":     "staging_roster",
+        "QA.xlsx":         "staging_qa",
+        "CSAT.xlsx":       "staging_csat",
+        "Adherence.xlsx":  "staging_adherence",
+    }
+    confirmed_relationships = [
+        # All three fact tables FK to Roster (PK side = file_a)
+        {"relationship_type": "pk_fk", "file_a": "Roster.xlsx", "col_a": "agent_email",
+         "file_b": "QA.xlsx",         "col_b": "agent_email"},
+        {"relationship_type": "pk_fk", "file_a": "Roster.xlsx", "col_a": "agent_email",
+         "file_b": "CSAT.xlsx",       "col_b": "agent_email"},
+        {"relationship_type": "pk_fk", "file_a": "Roster.xlsx", "col_a": "agent_email",
+         "file_b": "Adherence.xlsx",  "col_b": "agent_email"},
+    ]
+    return dfs, names, upload_table_map, confirmed_relationships
+
+
+def test_apply_relationships_enriches_all_fact_tables_not_just_first():
+    """_apply_relationships must LEFT-JOIN every fact table to the dimension,
+    not only the first one encountered in pk_fk_joins.
+
+    CURRENT BUG (compute.py:400-407):
+        fact_name = pk_fk_joins[0]["fact"]   # picks QA only
+        for join in pk_fk_joins:
+            if join["fact"] != fact_name:
+                continue                      # CSAT and Adherence skipped
+
+    After the fix all three fact tables must carry 'location' and 'supervisor'
+    from the Roster dimension join.
+    """
+    from services.compute import _apply_relationships
+
+    dfs, names, upload_table_map, confirmed_relationships = _make_star_schema_fixtures()
+    result = _apply_relationships(dfs, names, confirmed_relationships, upload_table_map)
+
+    assert isinstance(result, pd.DataFrame)
+    assert "location" in result.columns, "location column must be present after joins"
+
+    qa_rows = result[result["rubric_score"].notna()]
+    assert len(qa_rows) == 5, f"Expected 5 QA rows, got {len(qa_rows)}"
+    assert qa_rows["location"].notna().all(), (
+        "QA rows must have location from Roster join"
+    )
+
+    csat_rows = result[result["avg_csat_rating"].notna()]
+    assert len(csat_rows) == 5, f"Expected 5 CSAT rows, got {len(csat_rows)}"
+    assert csat_rows["location"].notna().all(), (
+        "CSAT rows must have location from Roster join — "
+        "FAILS currently because _apply_relationships only joins the first fact table"
+    )
+
+    adherence_rows = result[result["min_in_adherence"].notna()]
+    assert len(adherence_rows) == 5, f"Expected 5 Adherence rows, got {len(adherence_rows)}"
+    assert adherence_rows["location"].notna().all(), (
+        "Adherence rows must have location from Roster join — "
+        "FAILS currently because _apply_relationships only joins the first fact table"
+    )
+
+
+def test_apply_relationships_dimension_rows_not_standalone_in_result():
+    """The dimension (Roster) table must be joined into fact tables, not
+    appended as standalone rows.
+
+    After the fix the result should contain exactly 15 rows (5 QA + 5 CSAT +
+    5 Adherence).  Roster's 5 rows must NOT appear as an extra block.
+    """
+    from services.compute import _apply_relationships
+
+    dfs, names, upload_table_map, confirmed_relationships = _make_star_schema_fixtures()
+    result = _apply_relationships(dfs, names, confirmed_relationships, upload_table_map)
+
+    assert len(result) == 15, (
+        f"Expected exactly 15 rows (5×3 fact tables). Got {len(result)}. "
+        "If 20, the Roster dimension table was concat'd as standalone rows instead of joined."
+    )
+
+
+def test_apply_relationships_unrelated_table_still_in_result():
+    """A table that has no pk_fk relationship must still appear in the result
+    via the concat fallback — no data must be silently dropped.
+    """
+    from services.compute import _apply_relationships
+
+    agents = [f"u{i}@x.com" for i in range(3)]
+    df_roster = pd.DataFrame({"agent_email": agents, "location": ["G", "M", "H"]})
+    df_qa     = pd.DataFrame({"agent_email": agents, "rubric_score": [80.0, 90.0, 85.0]})
+    df_other  = pd.DataFrame({"some_metric": [1.0, 2.0, 3.0]})  # no relationship
+
+    dfs   = [df_roster, df_qa, df_other]
+    names = ["staging_roster", "staging_qa", "staging_other"]
+    upload_table_map = {
+        "Roster.xlsx": "staging_roster",
+        "QA.xlsx":     "staging_qa",
+        "Other.xlsx":  "staging_other",
+    }
+    confirmed_relationships = [
+        {"relationship_type": "pk_fk", "file_a": "Roster.xlsx", "col_a": "agent_email",
+         "file_b": "QA.xlsx",         "col_b": "agent_email"},
+    ]
+
+    result = _apply_relationships(dfs, names, confirmed_relationships, upload_table_map)
+
+    assert isinstance(result, pd.DataFrame)
+    # other table's metric must survive in result
+    other_rows = result[result["some_metric"].notna()]
+    assert len(other_rows) == 3, (
+        f"Expected 3 rows from the unrelated table, got {len(other_rows)}. "
+        "Tables with no pk_fk relationship must still appear via concat."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 23 — _enrich_dfs: cross-name donor key is also a filter column (Bug fix)
+# ---------------------------------------------------------------------------
+def test_enrich_cross_name_donor_key_is_also_filter_col():
+    """
+    CURRENT BUG (_enrich_dfs, line 280):
+        lookup_cols_donor = ([cross_rename] if cross_rename else [join_key]) + cols_to_add
+
+    When cross_rename (e.g. "email" in Roster) is ALSO in cols_to_add (because
+    "email" is a requested dimension column), lookup_cols_donor becomes:
+        ["email", "email", "full_name"]  ← duplicate!
+
+    pandas donor[["email", "email", ...]] creates a DataFrame with two "email" columns.
+    After rename({"email": "affirm_email"}), lookup has two "affirm_email" columns.
+    Then lookup["affirm_email"] returns a DataFrame, and .dtype raises AttributeError.
+
+    Real-world trigger: Adherence.affirm_email ↔ Roster.email (cross-name join),
+    and "email" is in recipe dimensions (filter_cols).  The dashboard 500s on first load.
+
+    After the fix, enrichment must succeed and the target table must receive both
+    "email" (as an alias of the join key) and "full_name" from the donor.
+    """
+    from services.compute import _enrich_dfs
+
+    emails = [f"u{i}@x.com" for i in range(5)]
+
+    # Adherence: has affirm_email (cross-name alias of Roster.email), no email/full_name
+    df_adherence = pd.DataFrame({
+        "affirm_email":    emails,
+        "min_in_adherence": [95.0, 88.0, 91.0, 93.0, 87.0],
+        "location":        ["G", "M", "G", "M", "G"],
+    })
+    # Roster: has email and full_name (the dimension columns we want to add)
+    df_roster = pd.DataFrame({
+        "email":     emails,
+        "full_name": [f"Name {i}" for i in range(5)],
+        "department": ["Ops"] * 5,
+    })
+
+    # filter_cols includes "email" — this is what triggers the duplicate-column bug
+    filter_cols = ["email", "full_name"]
+
+    # Must not raise AttributeError about DataFrame.dtype
+    result = _enrich_dfs(
+        [df_adherence, df_roster],
+        ["staging_adherence", "staging_roster"],
+        filter_cols,
+    )
+
+    assert isinstance(result, list), "_enrich_dfs must return a list of DataFrames"
+    adherence_enriched = result[0]
+    assert isinstance(adherence_enriched, pd.DataFrame)
+
+    # After fix: Adherence must have both "email" and "full_name"
+    assert "full_name" in adherence_enriched.columns, (
+        "full_name must be propagated from Roster to Adherence"
+    )
+    assert "email" in adherence_enriched.columns, (
+        "email (donor join key) must also be available on Adherence after enrichment "
+        "so that dashboard filters on email= work correctly"
+    )
+    assert adherence_enriched["email"].notna().all(), (
+        "email values must be populated for all Adherence rows"
+    )
+    # Verify values are correct
+    assert list(adherence_enriched["email"]) == emails, (
+        "email column on Adherence must match the affirm_email values (same addresses)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests 24-25 — Fix D: cardinality-based direction validation in _apply_relationships
+# ---------------------------------------------------------------------------
+
+def test_apply_relationships_skips_low_cardinality_pk_fk_to_prevent_explosion():
+    """
+    Two fact tables (QA, CSAT) share a date column (27 unique out of thousands of rows).
+    The stored confirmed_relationships marks this as pk_fk with QA as file_a (PK side).
+    Joining QA.date → CSAT.date would produce a many-to-many explosion.
+
+    After Fix D, _apply_relationships must detect that max(ratio_a, ratio_b) < 0.5
+    and skip the join — falling back to plain concat of both tables.
+    """
+    from services.compute import _apply_relationships
+
+    dates = [f"2026-{m:02d}-01" for m in range(1, 6)]  # 5 unique dates
+    # Each date appears 4 times — very low cardinality ratio (5/20 = 0.25)
+    qa_dates   = dates * 4
+    csat_dates = dates * 4
+
+    df_qa   = pd.DataFrame({"date": qa_dates,   "qa_score": [85.0] * 20})
+    df_csat = pd.DataFrame({"date": csat_dates, "csat":     [4.5]  * 20})
+
+    dfs   = [df_qa, df_csat]
+    names = ["staging_qa", "staging_csat"]
+    upload_table_map = {"QA.xlsx": "staging_qa", "CSAT.xlsx": "staging_csat"}
+    # Stored as pk_fk but both sides are low-cardinality — a direction error
+    confirmed_relationships = [
+        {"relationship_type": "pk_fk", "file_a": "QA.xlsx", "col_a": "date",
+         "file_b": "CSAT.xlsx", "col_b": "date"},
+    ]
+
+    result = _apply_relationships(dfs, names, confirmed_relationships, upload_table_map)
+
+    assert isinstance(result, pd.DataFrame)
+    # Both tables must appear (concat, not join)
+    assert len(result) == 40, (
+        f"Expected 40 rows (20 QA + 20 CSAT via concat). Got {len(result)}. "
+        "If >> 40, a many-to-many cartesian join was not prevented."
+    )
+    assert "qa_score" in result.columns
+    assert "csat" in result.columns
+
+
+def test_apply_relationships_auto_flips_reversed_pk_fk_direction():
+    """
+    The stored confirmed_relationships has file_a = Adherence (fact) and
+    file_b = Roster (dimension) — opposite of the correct direction.
+    (Adherence.affirm_email has ratio 0.018; Roster.email has ratio 1.0)
+
+    After Fix D, _apply_relationships must detect the flip and join
+    Adherence (fact) → Roster (dim), producing one row per Adherence row
+    with Roster columns added (no row count explosion).
+    """
+    from services.compute import _apply_relationships
+
+    emails  = [f"agent{i}@co.com" for i in range(5)]
+    # fact: each email appears 3 times (ratio = 5/15 = 0.33)
+    adh_emails = emails * 3
+    df_adherence = pd.DataFrame({
+        "affirm_email":    adh_emails,
+        "min_in_adherence": [95.0, 88.0, 91.0, 93.0, 87.0] * 3,
+    })
+    # dimension: each email appears once (ratio = 5/5 = 1.0)
+    df_roster = pd.DataFrame({
+        "email":    emails,
+        "location": ["Gurgaon", "Manila", "Heredia", "Gurgaon", "Manila"],
+    })
+
+    dfs   = [df_adherence, df_roster]
+    names = ["staging_adherence", "staging_roster"]
+    upload_table_map = {
+        "Adherence.xlsx": "staging_adherence",
+        "Roster.xlsx":    "staging_roster",
+    }
+    # Stored with file_a = Adherence (wrong — lower cardinality side),
+    # file_b = Roster (correct PK/dim side).
+    confirmed_relationships = [
+        {"relationship_type": "pk_fk",
+         "file_a": "Adherence.xlsx", "col_a": "affirm_email",
+         "file_b": "Roster.xlsx",    "col_b": "email"},
+    ]
+
+    result = _apply_relationships(dfs, names, confirmed_relationships, upload_table_map)
+
+    assert isinstance(result, pd.DataFrame)
+    # Row count must equal Adherence rows (15), NOT Adherence × Roster (75)
+    assert len(result) == 15, (
+        f"Expected 15 rows (one per Adherence row, Roster joined many-to-one). "
+        f"Got {len(result)}. If 75, the direction was not flipped and a cartesian "
+        "explosion occurred (Roster treated as fact, Adherence as dimension)."
+    )
+    # Roster's location column must appear on all rows
+    assert "location" in result.columns, "location from Roster must be joined into result"
+    assert result["location"].notna().all(), (
+        "All rows must have location from Roster after the auto-corrected join"
+    )
