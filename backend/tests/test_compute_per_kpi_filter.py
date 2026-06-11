@@ -552,3 +552,136 @@ def test_classify_fact_table():
     assert result == "fact", (
         f"Expected 'fact' for table with date and measure columns, got '{result}'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 17 — cross-name probe uses unique-value sampling (Bug 1 regression test)
+# ---------------------------------------------------------------------------
+def test_cross_name_probe_uses_unique_sampling():
+    """
+    QA data is sorted: the first 200 rows are all for Agent-0, whose email is NOT in
+    Roster.  Agents 1-99 ARE in Roster.
+
+    With head(200): left_sample = {"agent0@x.com"} → overlap 0/1 = 0% → probe returns None.
+    With unique()[:200]: left_sample = 100 distinct emails → 99 of 100 in Roster → 99% → OK.
+
+    This test verifies the bug fix: the probe must use unique sampling.
+    """
+    from services.compute import _find_cross_name_join_key  # noqa: PLC0415
+
+    all_agents = [f"agent{i}@x.com" for i in range(100)]
+    roster_agents = all_agents[1:]  # agents 1-99; agent-0 is NOT in Roster
+
+    # First 200 rows are all for agent-0 (simulates data sorted by agent)
+    qa_emails = [all_agents[0]] * 200 + all_agents[1:]
+    left_df = pd.DataFrame({
+        "agent_email": qa_emails,
+        "rubric_score": range(len(qa_emails)),
+    })
+    right_df = pd.DataFrame({
+        "email": roster_agents,
+        "one_up_manager": [f"Mgr{i % 5}" for i in range(len(roster_agents))],
+    })
+
+    result = _find_cross_name_join_key(left_df, right_df)
+
+    assert result is not None, (
+        "Cross-name probe must find agent_email→email when unique sampling is used. "
+        "If this fails, head() is being used instead of unique()."
+    )
+    left_col, right_col = result
+    assert left_col == "agent_email", f"Expected left_col='agent_email', got '{left_col}'"
+    assert right_col == "email", f"Expected right_col='email', got '{right_col}'"
+
+
+# ---------------------------------------------------------------------------
+# Test 18 — enrichment prefers cross-name key when it has higher cardinality
+# ---------------------------------------------------------------------------
+def test_enrich_prefers_cross_name_over_low_cardinality_same_name():
+    """
+    Fact table shares column 'pod' with Roster (same-name, cardinality 3).
+    Fact table also has 'agent_email' which overlaps with Roster.email (cross-name, cardinality 50).
+
+    Before fix: join uses pod → agent a3 (Pod0) wrongly gets Mgr0 instead of Mgr3.
+    After fix:  join uses agent_email→email (higher cardinality) → a3 correctly gets Mgr3.
+    """
+    from services.compute import _enrich_dfs  # noqa: PLC0415
+
+    agents = [f"a{i}@x.com" for i in range(50)]
+
+    df_roster = pd.DataFrame({
+        "email": agents,
+        "one_up_manager": [f"Mgr{i % 5}" for i in range(50)],
+        "pod": [f"Pod{i % 3}" for i in range(50)],   # same column name as fact table
+    })
+    df_fact = pd.DataFrame({
+        "agent_email": agents,
+        "pod": [f"Pod{i % 3}" for i in range(50)],   # shared same-name col, cardinality 3
+        "rubric_score": [float(i) for i in range(50)],
+    })
+
+    result = _enrich_dfs(
+        [df_roster, df_fact],
+        ["staging_roster", "staging_fact"],
+        ["one_up_manager"],
+    )
+
+    fact_enriched = result[1]
+    assert "one_up_manager" in fact_enriched.columns
+
+    # Agent a3 is in Pod0 but has manager Mgr3 (since 3 % 5 == 3).
+    # A pod-based join (wrong) would assign Mgr0 (the first agent in Pod0).
+    # An agent_email-based join (correct) assigns Mgr3.
+    row_a3 = fact_enriched[fact_enriched["agent_email"] == "a3@x.com"].iloc[0]
+    assert row_a3["one_up_manager"] == "Mgr3", (
+        f"Expected agent-level manager Mgr3 for a3@x.com, got {row_a3['one_up_manager']}. "
+        "If Mgr0, enrichment is using the low-cardinality pod key instead of agent_email."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 19 — pass-2 transitive enrichment: QA → enriched-CSAT → one_up_manager
+# ---------------------------------------------------------------------------
+def test_enrich_pass2_transitive_via_sibling():
+    """
+    QA shares no column name with Roster and the cross-name probe between QA and Roster
+    fails (different email domains → overlap below threshold).
+    CSAT is enriched from Roster in pass 1 (via department, same-name key).
+    In pass 2, QA enriches from enriched-CSAT via agent_email (same-name), inheriting
+    one_up_manager transitively.
+    """
+    from services.compute import _enrich_dfs  # noqa: PLC0415
+
+    qa_agents = [f"qa{i}@company.com" for i in range(10)]
+    roster_agents = [f"roster{i}@company.com" for i in range(50)]  # different domain → no overlap
+
+    df_roster = pd.DataFrame({
+        "email": roster_agents,
+        "one_up_manager": [f"Mgr{i % 3}" for i in range(50)],
+        "department": [f"Dept{i % 5}" for i in range(50)],
+    })
+    # CSAT shares department (same-name) with Roster → enriched in pass 1
+    df_csat = pd.DataFrame({
+        "agent_email": qa_agents,             # same agents as QA
+        "department": [f"Dept{i % 5}" for i in range(10)],
+        "avg_csat_rating": [4.0] * 10,
+    })
+    # QA: no column in common with Roster; shares agent_email with enriched-CSAT
+    df_qa = pd.DataFrame({
+        "agent_email": qa_agents,
+        "rubric_score": [85.0] * 10,
+    })
+
+    result = _enrich_dfs(
+        [df_roster, df_csat, df_qa],
+        ["staging_roster", "staging_csat", "staging_qa"],
+        ["one_up_manager"],
+    )
+
+    qa_enriched = result[2]
+    assert "one_up_manager" in qa_enriched.columns, (
+        "QA must receive one_up_manager from Roster transitively via enriched-CSAT in pass 2"
+    )
+    assert qa_enriched["one_up_manager"].notna().all(), (
+        "Every QA row must have one_up_manager populated after pass-2 enrichment"
+    )

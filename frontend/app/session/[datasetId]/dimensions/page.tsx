@@ -9,14 +9,6 @@ import type { DimensionColumn, InterviewResult, KpiSuggestion } from "@/lib/type
 const STEPS = ["Upload", "Schema", "Interview", "KPIs", "Dimensions", "Dashboard"];
 const ACTIVE_STEP = 4; // 0-based
 
-// Group dimensions by source file
-function groupByFile(dims: DimensionColumn[]): Record<string, DimensionColumn[]> {
-  return dims.reduce<Record<string, DimensionColumn[]>>((acc, d) => {
-    (acc[d.source_file] ??= []).push(d);
-    return acc;
-  }, {});
-}
-
 export default function DimensionsPage() {
   const { datasetId } = useParams<{ datasetId: string }>();
   const router = useRouter();
@@ -131,7 +123,10 @@ export default function DimensionsPage() {
     }
   }
 
-  const grouped = groupByFile(dimensions);
+  // Highest table_count across all returned dimensions (for "all tables" badge logic)
+  const maxTableCount = dimensions.length > 0
+    ? Math.max(...dimensions.map((d) => d.table_count ?? 1))
+    : 0;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -220,63 +215,63 @@ export default function DimensionsPage() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-5">
-              {Object.entries(grouped).map(([file, cols]) => (
-                <div key={file}>
-                  {/* File group header */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider truncate">
-                      {file}
-                    </span>
-                    <div className="flex-1 h-px bg-gray-100" />
-                  </div>
+            <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-1">
+              {dimensions.map((dim) => {
+                const isSelected = selected.some((d) => d.name === dim.name);
+                const tc = dim.table_count ?? 1;
+                const isAllTables = maxTableCount > 1 && tc === maxTableCount;
+                const showBadge = maxTableCount > 1;
+                return (
+                  <button
+                    key={dim.name}
+                    onClick={() => toggle(dim)}
+                    className={`w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                      isSelected
+                        ? "border-teal-200 bg-teal-50/60"
+                        : "border-transparent hover:bg-gray-50"
+                    }`}
+                  >
+                    {/* Checkbox */}
+                    <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                      isSelected ? "border-teal-500 bg-teal-500" : "border-gray-300"
+                    }`}>
+                      {isSelected && (
+                        <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="none">
+                          <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </div>
 
-                  <div className="space-y-1">
-                    {cols.map((dim) => {
-                      const isSelected = selected.some((d) => d.name === dim.name);
-                      return (
-                        <button
-                          key={dim.name}
-                          onClick={() => toggle(dim)}
-                          className={`w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
-                            isSelected
-                              ? "border-teal-200 bg-teal-50/60"
-                              : "border-transparent hover:bg-gray-50"
-                          }`}
-                        >
-                          {/* Checkbox */}
-                          <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
-                            isSelected ? "border-teal-500 bg-teal-500" : "border-gray-300"
-                          }`}>
-                            {isSelected && (
-                              <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="none">
-                                <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            )}
-                          </div>
-
-                          {/* Column info */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium text-gray-800 font-mono">
-                                {dim.name}
-                              </span>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                                {dim.unique_count} unique
-                              </span>
-                            </div>
-                            {dim.sample_values.length > 0 && (
-                              <p className="text-xs text-gray-400 mt-0.5 truncate">
-                                e.g. {dim.sample_values.slice(0, 3).join(", ")}
-                              </p>
-                            )}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+                    {/* Column info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-gray-800 font-mono">
+                          {dim.name}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                          {dim.unique_count} unique
+                        </span>
+                        {showBadge && (
+                          isAllTables ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-medium">
+                              all tables
+                            </span>
+                          ) : (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
+                              {tc} table{tc !== 1 ? "s" : ""}
+                            </span>
+                          )
+                        )}
+                      </div>
+                      {dim.sample_values.length > 0 && (
+                        <p className="text-xs text-gray-400 mt-0.5 truncate">
+                          e.g. {dim.sample_values.slice(0, 3).join(", ")}
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
 
               {dimensions.length === 0 && (
                 <p className="text-sm text-gray-400 py-8 text-center">

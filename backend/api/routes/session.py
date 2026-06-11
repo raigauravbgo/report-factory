@@ -160,19 +160,31 @@ def kpi_suggestions(dataset_id: int, body: KpiSuggestRequest, db: Session = Depe
 
 class DimensionColumn(BaseModel):
     name: str
-    source_file: str
+    source_file: str          # "multiple" when the column spans > 1 staging table
     semantic_tag: str | None = None
     unique_count: int
     sample_values: list[str] = []
+    table_count: int = 1      # how many staging tables contain this column
+
+
+_DIM_EXCLUDED_TAGS = frozenset({"entity_key", "time_key", "financial_metric"})
 
 
 @router.get("/{dataset_id}/dimensions", response_model=list[DimensionColumn])
 def get_dimensions(dataset_id: int, db: Session = Depends(get_db)):
-    """Aggregate dimension columns from all uploads in the dataset.
+    """Return dimension columns using a Power BI star-schema priority order.
 
-    A column qualifies when suggested_role == "dimension" and semantic_tag is not
-    entity_key, time_key, or financial_metric. Columns are deduplicated by name
-    (last file wins on collision).
+    Branch 1 — virtual_dimension table(s) exist:
+        Use their dimension columns (pre-filtered to stable shared columns).
+    Branch 2 — regular dimension table(s) exist (table_type == "dimension"):
+        Use their dimension columns (the canonical categorical attributes).
+    Branch 3 — no dimension tables:
+        Use columns that appear in >= 2 fact/unknown tables (genuinely shared).
+    Branch 4 — fallback (heterogeneous or single-file dataset):
+        Return all dimension-role columns (matches previous behaviour).
+
+    In every branch, table_count reflects how many staging tables hold the column
+    so the UI can show "all tables" / "N tables" badges.
     """
     staging_rows = (
         db.query(StagingTable)
@@ -180,27 +192,94 @@ def get_dimensions(dataset_id: int, db: Session = Depends(get_db)):
         .filter(Upload.dataset_id == dataset_id)
         .all()
     )
-    seen: dict[str, DimensionColumn] = {}
+    if not staging_rows:
+        return []
+
+    # ── Phase 1: build global cross-table column index ────────────────────────
+    # col_name → {count, best_unique, best_samples, best_file, semantic_tag}
+    col_index: dict[str, dict] = {}
+    virtual_dim_stagings: list = []
+    real_dim_stagings: list = []
+
     for st in staging_rows:
         if not st.profile_data:
             continue
-        source_file = st.upload.filename
+        table_type = st.profile_data.get("table_type", "unknown")
+        if table_type == "virtual_dimension":
+            virtual_dim_stagings.append(st)
+        elif table_type == "dimension":
+            real_dim_stagings.append(st)
+
         for col in st.profile_data.get("columns", []):
-            role = col.get("suggested_role", "")
-            tag = col.get("semantic_tag", "")
-            if role != "dimension":
+            if col.get("suggested_role") != "dimension":
                 continue
-            if tag in ("entity_key", "time_key", "financial_metric"):
+            if col.get("semantic_tag") in _DIM_EXCLUDED_TAGS:
                 continue
-            samples = [str(v) for v in (col.get("sample_values") or [])[:5]]
-            seen[col["name"]] = DimensionColumn(
-                name=col["name"],
-                source_file=source_file,
-                semantic_tag=tag or None,
-                unique_count=col.get("unique_count", 0),
-                sample_values=samples,
-            )
-    return list(seen.values())
+            cname = col["name"]
+            ucount = col.get("unique_count", 0)
+            if cname not in col_index:
+                col_index[cname] = {
+                    "count": 0,
+                    "best_unique": ucount,
+                    "best_samples": [str(v) for v in (col.get("sample_values") or [])[:5]],
+                    "best_file": st.upload.filename,
+                    "semantic_tag": col.get("semantic_tag") or None,
+                }
+            col_index[cname]["count"] += 1
+            if ucount > col_index[cname]["best_unique"]:
+                col_index[cname]["best_unique"] = ucount
+                col_index[cname]["best_samples"] = [str(v) for v in (col.get("sample_values") or [])[:5]]
+                col_index[cname]["best_file"] = st.upload.filename
+
+    def _make_result(names: "set[str]") -> "list[DimensionColumn]":
+        result = []
+        for name in names:
+            if name not in col_index:
+                continue
+            info = col_index[name]
+            tc = info["count"]
+            result.append(DimensionColumn(
+                name=name,
+                source_file="multiple" if tc > 1 else info["best_file"],
+                semantic_tag=info["semantic_tag"],
+                unique_count=info["best_unique"],
+                sample_values=info["best_samples"],
+                table_count=tc,
+            ))
+        result.sort(key=lambda d: (-d.table_count, d.name))
+        return result
+
+    # ── Branch 1: virtual_dimension table(s) ─────────────────────────────────
+    if virtual_dim_stagings:
+        candidates: set[str] = set()
+        for st in virtual_dim_stagings:
+            for col in st.profile_data.get("columns", []):
+                if col.get("suggested_role") == "dimension" and col.get("semantic_tag") not in _DIM_EXCLUDED_TAGS:
+                    candidates.add(col["name"])
+        if candidates:
+            logger.info("get_dimensions dataset_id=%d branch=virtual_dimension cols=%d", dataset_id, len(candidates))
+            return _make_result(candidates)
+
+    # ── Branch 2: regular dimension table(s) ─────────────────────────────────
+    if real_dim_stagings:
+        candidates = set()
+        for st in real_dim_stagings:
+            for col in st.profile_data.get("columns", []):
+                if col.get("suggested_role") == "dimension" and col.get("semantic_tag") not in _DIM_EXCLUDED_TAGS:
+                    candidates.add(col["name"])
+        if candidates:
+            logger.info("get_dimensions dataset_id=%d branch=dimension_tables cols=%d", dataset_id, len(candidates))
+            return _make_result(candidates)
+
+    # ── Branch 3: columns shared across >= 2 tables ───────────────────────────
+    shared = {name for name, info in col_index.items() if info["count"] >= 2}
+    if shared:
+        logger.info("get_dimensions dataset_id=%d branch=shared_columns cols=%d", dataset_id, len(shared))
+        return _make_result(shared)
+
+    # ── Branch 4: fallback — single-file or fully heterogeneous ──────────────
+    logger.info("get_dimensions dataset_id=%d branch=fallback_all cols=%d", dataset_id, len(col_index))
+    return _make_result(set(col_index.keys()))
 
 
 # ── Virtual Dimension ─────────────────────────────────────────────────────────

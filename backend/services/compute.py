@@ -129,7 +129,7 @@ def _find_cross_name_join_key(
     for lc in left_df.columns:
         if pd.api.types.is_numeric_dtype(left_df[lc]):
             continue
-        left_sample = set(left_df[lc].dropna().astype(str).head(sample_size))
+        left_sample = set(left_df[lc].dropna().astype(str).unique()[:sample_size])
         if not left_sample:
             continue
         for rc in donor_df.columns:
@@ -250,17 +250,25 @@ def _enrich_dfs(
                 and _joinable(enriched[i][k])
                 and _joinable(donor[k])
             ]
-            join_key: str | None = (
+            same_key: str | None = (
                 max(shared, key=lambda k: int(enriched[i][k].nunique())) if shared else None
             )
+            same_card = int(enriched[i][same_key].nunique()) if same_key else 0
+
+            # Always probe for a cross-name key; prefer it when it gives higher entity
+            # resolution than the best same-name key (e.g. agent_email→email cardinality
+            # ~1000 beats pod→pod cardinality ~12, yielding correct agent-level joins).
+            cross = _find_cross_name_join_key(enriched[i], donor)
+            cross_key        = cross[0] if cross else None
+            cross_donor_key  = cross[1] if cross else None
+            cross_card       = int(enriched[i][cross_key].nunique()) if cross_key else 0
 
             cross_rename: "str | None" = None
-            if join_key is None:
-                cross = _find_cross_name_join_key(enriched[i], donor)
-                if cross:
-                    left_key, donor_key = cross
-                    join_key = left_key
-                    cross_rename = donor_key
+            if cross_key and cross_card > same_card:
+                join_key     = cross_key
+                cross_rename = cross_donor_key
+            else:
+                join_key = same_key
 
             if join_key is None:
                 logger.debug(
@@ -284,6 +292,42 @@ def _enrich_dfs(
                 "ENRICH table=%s cols=%s via join_key=%s from donor index %d",
                 table_names[i], cols_to_add, join_key, donor_j,
             )
+
+    # Pass 2: transitive enrichment — tables still missing filter_cols after the main
+    # pass can pull from already-enriched siblings via same-name join keys.
+    # Example: QA shares no column name with Roster but enriched-CSAT has both
+    # agent_email (same name as QA) and one_up_manager (pulled from Roster in pass 1).
+    for i in range(len(enriched)):
+        still_missing = [c for c in filter_cols if c not in enriched[i].columns]
+        if not still_missing:
+            continue
+        for j, enriched_donor in enumerate(enriched):
+            if j == i or not all(c in enriched_donor.columns for c in still_missing):
+                continue
+            shared2 = [
+                k for k in enriched[i].columns
+                if k in enriched_donor.columns
+                and _joinable(enriched[i][k])
+                and _joinable(enriched_donor[k])
+            ]
+            if not shared2:
+                continue
+            key2 = max(shared2, key=lambda k: int(enriched[i][k].nunique()))
+            lookup2 = (
+                enriched_donor[[key2] + still_missing]
+                .drop_duplicates(subset=[key2])
+                .copy()
+            )
+            left2 = enriched[i].copy()
+            if left2[key2].dtype != lookup2[key2].dtype:
+                left2[key2] = left2[key2].astype(str)
+                lookup2[key2] = lookup2[key2].astype(str)
+            enriched[i] = left2.merge(lookup2, on=key2, how="left", suffixes=("", "_enr"))
+            logger.info(
+                "ENRICH_PASS2 table=%s cols=%s via key=%s from enriched index=%d",
+                table_names[i], still_missing, key2, j,
+            )
+            break  # all still_missing cols obtained from this donor
 
     return enriched
 

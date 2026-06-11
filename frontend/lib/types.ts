@@ -145,6 +145,7 @@ export interface DimensionColumn {
   semantic_tag: string | null;
   unique_count: number;
   sample_values: string[];
+  table_count: number;
 }
 
 export interface ValidationWarning {
