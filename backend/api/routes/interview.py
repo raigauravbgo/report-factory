@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from models.dataset import Dataset
 from models.kpi_definition import KpiDefinition
 from models.report_recipe import ReportRecipe
 from models.staging_table import StagingTable
@@ -42,6 +43,73 @@ def _recipe_response(recipe: ReportRecipe) -> RecipeResponse:
         version=recipe.version,
         approved_at=recipe.approved_at.isoformat() if recipe.approved_at else None,
     )
+
+
+# ── Skip interview ────────────────────────────────────────────────────────────
+
+@router.post("/skip", response_model=dict)
+def skip_interview(
+    body: dict,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(_get_client_id),
+):
+    """Skip the interview step. AI builds recipe from schema + data model context."""
+    dataset_id = body.get("dataset_id")
+    if not dataset_id:
+        raise HTTPException(400, "dataset_id is required.")
+
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(404, "Dataset not found.")
+
+    dataset.pipeline_stage = "kpi_selection"
+    db.commit()
+
+    return {
+        "dataset_id": dataset_id,
+        "pipeline_stage": dataset.pipeline_stage,
+        "next_stage": "kpi_selection",
+    }
+
+
+@router.post("/recipe/from-context", response_model=RecipeResponse, status_code=201)
+def create_recipe_from_context(
+    body: dict,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(_get_client_id),
+):
+    """Generate recipe from pipeline context (used when interview is skipped)."""
+    dataset_id = body.get("dataset_id")
+    if not dataset_id:
+        raise HTTPException(400, "dataset_id is required.")
+
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(404, "Dataset not found.")
+
+    config = recipe_generator.generate_from_context(dataset_id, db)
+
+    recipe = ReportRecipe(
+        client_id=client_id,
+        dataset_id=dataset_id,
+        config=config.model_dump(),
+        version=1,
+    )
+    db.add(recipe)
+    db.flush()
+
+    for kpi in config.kpis:
+        db.add(KpiDefinition(
+            client_id=client_id,
+            recipe_id=recipe.id,
+            name=kpi.name,
+            formula=kpi.formula,
+        ))
+
+    dataset.pipeline_stage = "recipe"
+    db.commit()
+    db.refresh(recipe)
+    return _recipe_response(recipe)
 
 
 # ── Interview ─────────────────────────────────────────────────────────────────

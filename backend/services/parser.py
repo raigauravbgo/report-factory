@@ -49,8 +49,8 @@ def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _write_staging_table(df: pd.DataFrame, table_name: str, db: Session) -> None:
-    conn = db.get_bind()
-    # Drop if re-parsing the same upload
-    db.execute(text(f"DROP TABLE IF EXISTS `{table_name}`"))
-    db.commit()
-    df.to_sql(table_name, con=conn, index=False, if_exists="replace", chunksize=5000)
+    from sqlalchemy import inspect as sa_inspect
+    # Skip if the staging table was already written (avoids re-parsing large files)
+    if sa_inspect(db.get_bind()).has_table(table_name):
+        return
+    df.to_sql(table_name, con=db.get_bind(), index=False, if_exists="replace", chunksize=5000)

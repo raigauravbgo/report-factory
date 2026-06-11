@@ -2,7 +2,35 @@
 
 ## Strategic Context
 
-This is the first surface of the BGO AI Platform. The KPI catalog, schema memory data model, and ADK skill manifest pattern built here become the foundation every subsequent agent inherits — Hunter Point Capital's deal workflow, the voice collections agent, internal ops automation. Treat the catalog format and schema memory schema as public API: versioned, reviewed, intentional. Getting these right in the MVP costs nothing extra. Unwinding them after five agents inherit from them is expensive.
+This is the first surface of the BGO AI Platform. The KPI catalog, schema memory data model, and ADK skill manifest pattern built here become the foundation every subsequent agent inherits — Hunter Point Capital's deal workflow, the voice collections agent, internal ops automation. Treat the catalog format and schema memory schema as public API: versioned, reviewed, intentional.
+
+---
+
+## Implementation Status
+
+| Sprint | Scope | Status |
+|--------|-------|--------|
+| Sprint 1 | DB models, migration, Pydantic schemas, validator, validate route | ✅ Done |
+| Sprint 2 | schema_mapper.py, multi-file upload route, dataset schema endpoints | ✅ Done |
+| Sprint 3 | data_modeler.py, data_model route | ✅ Done |
+| Sprint 4 | kpi_suggester.py, dimension_suggester.py, kpi-suggestions route, dimensions route, recipe skip path, generate_from_context() | ✅ Done |
+| Sprint 5 | Multi-file UploadZone, upload page, SchemaColumnTable, schema-mapping page, data-modeling page, lib/api.ts + lib/types.ts | ✅ Done |
+| Sprint 6 | KpiCard, FormulaInput, ValidationPanel, kpi-selection page, dimension-selection page, enhanced interview + recipe pages | ✅ Done |
+
+---
+
+## New Pipeline Flow (implemented)
+
+```
+Multi-file Upload  (/upload)
+  → Schema Mapping  (/schema-mapping/{datasetId})
+  → Data Modeling   (/data-modeling/{datasetId})
+  → Interview       (/interview?datasetId=X)   ← optional; skip button available
+  → KPI Selection   (/kpi-selection/{datasetId})
+  → Dimension Select (/dimension-selection/{datasetId})
+  → Recipe          (/recipe/{recipeId})
+  → Dashboard       (/dashboard/{recipeId})
+```
 
 ---
 
@@ -10,326 +38,209 @@ This is the first surface of the BGO AI Platform. The KPI catalog, schema memory
 
 | Layer | MVP | Production |
 |---|---|---|
-| Backend | FastAPI (Python) | Same |
-| Database | SQLite | PostgreSQL on AWS RDS — change one `DATABASE_URL` line |
-| Agent | Google ADK local (`pip install google-adk`) | ADK on AWS ECS Fargate — same code, different deployment target |
+| Backend | FastAPI (Python 3.12) | Same |
+| Database | SQLite + SQLAlchemy ORM + Alembic migrations | PostgreSQL — change one `DATABASE_URL` line |
+| Agent | Google ADK local | ADK on AWS ECS Fargate |
 | LLM | Claude via Anthropic API (`claude-sonnet-4-20250514`) | Same |
-| Observability | `adk web` local trace UI (built-in, zero setup) | Langfuse self-hosted — one config line swap |
-| Frontend | React + Vite (port 5173) | Same |
+| Frontend | Next.js 16 + TypeScript + Tailwind | Migrate to React + Vite (PROJECT_PLAN Week 3) |
 | Charts | Recharts | Same |
-| Export | python-pptx against BGO slide master | Same |
-| Column matching | `difflib.SequenceMatcher` fuzzy match | pgvector semantic search |
-| File storage | Local `/uploads` | AWS S3 — swap `save_file()` / `get_file()` helpers only |
-| Auth | None | BGO SSO (SAML/OAuth2) |
-| Secrets | `.env` file | AWS Secrets Manager |
+| Formula validation | asteval (sandboxed) | Same |
+| File storage | Local `/uploads` → swap to S3 via `services/storage.py` | AWS S3 |
+| Auth | None | BGO SSO |
 
 ---
 
-## Project Structure
+## Backend File Map
 
 ```
-report-automation/
-├── backend/
-│   ├── main.py                        # FastAPI app, all routes
-│   ├── agent/
-│   │   └── report_factory_agent/
-│   │       ├── __init__.py
-│   │       ├── agent.py               # Root ADK agent definition
-│   │       └── tools/
-│   │           ├── intake.py          # Step 1: template + KPI selection
-│   │           ├── data_discovery.py  # Step 2: Excel parsing + fuzzy mapping
-│   │           ├── standardise.py     # Step 3: KPI computation + validation
-│   │           └── generate.py        # Step 4: chart JSON + PPTX
-│   ├── catalog/
-│   │   ├── kpis.json                  # ~50 KPI definitions (BGO IP)
-│   │   └── templates/
-│   │       ├── client_health.json
-│   │       ├── wbr_qbr.json
-│   │       ├── exec_scorecard.json
-│   │       └── kpi_spotlight.json
-│   ├── db/
-│   │   ├── schema.sql                 # SQLite schema (source of truth)
-│   │   └── database.py                # DB connection + helpers
-│   ├── exporters/
-│   │   └── pptx_exporter.py           # python-pptx against BGO slide master
-│   ├── seed_catalog.py                # One-time: loads kpis.json into kpi_catalog table
-│   ├── requirements.txt
-│   └── .env.example
-└── frontend/                          # React + Vite app (port 5173)
-    ├── src/
-    │   ├── pages/
-    │   │   ├── Library.jsx            # Dashboard library (home)
-    │   │   ├── Intake.jsx             # Agent chat UI
-    │   │   ├── MappingConfirm.jsx     # Column mapping confirmation
-    │   │   ├── Dashboard.jsx          # Interactive dashboard view
-    │   │   └── ReviewQueue.jsx        # Central team review interface
-    │   ├── components/
-    │   │   ├── charts/                # Recharts wrappers
-    │   │   └── ui/                    # Buttons, badges, modals
-    │   └── App.jsx
-    └── package.json
+backend/
+├── main.py                        # FastAPI app — all routes registered here
+├── core/config.py                 # Settings (Anthropic, OpenAI, S3, DB, app_env)
+├── core/database.py               # SQLAlchemy engine + SessionLocal + get_db()
+├── db/
+│   ├── schema.sql                 # SQLite schema (4 original PRD3 tables)
+│   └── database.py                # Raw SQLite helpers (KPI CRUD, schema_memory, review_queue)
+├── models/                        # SQLAlchemy ORM models
+│   ├── dataset.py                 # +pipeline_stage, +pipeline_context
+│   ├── upload.py                  # +schema_mapping_status
+│   ├── column_schema.py           # NEW — ai_* columns + confirmed_* overrides (audit trail)
+│   ├── data_model.py              # NEW — tables/primary_keys/foreign_keys as JSON
+│   ├── staging_table.py, report_recipe.py, kpi_definition.py, dashboard_config.py, processed_table.py
+├── schemas/
+│   ├── upload.py                  # UploadResponse, UploadBatchResponse, ProfilingResult
+│   └── interview.py               # RecipeConfig (extended), all new pipeline schemas
+├── api/routes/
+│   ├── upload.py                  # Multi-file POST /upload + dataset schema endpoints
+│   ├── data_model.py              # NEW — /data-model/suggest, /{id}, /{id}/confirm
+│   ├── kpi_suggestions.py         # NEW — /kpi-suggestions, /kpi-suggestions/select
+│   ├── dimensions.py              # NEW — /dimensions/{id}, /dimensions/{id}/select
+│   ├── validate.py                # NEW — /validate/kpi-formula, /validate/recipe
+│   ├── interview.py               # +/interview/skip, +/interview/recipe/from-context
+│   ├── kpis.py, reports.py        # Unchanged
+├── services/
+│   ├── schema_mapper.py           # NEW — 5-type classification + AI pass + apply_overrides()
+│   ├── data_modeler.py            # NEW — heuristic + AI fact/dim + PK/FK + integrity check
+│   ├── kpi_suggester.py           # NEW — catalog scoring + AI re-ranking
+│   ├── dimension_suggester.py     # NEW — dim-table-only columns + AI annotation
+│   ├── validator.py               # NEW — validate_upload/schema/data_model/kpi_formula/recipe/drift
+│   ├── recipe_generator.py        # +generate_from_context() for skip path
+│   ├── ai_client.py, ai_interview.py, parser.py, profiler.py, storage.py  # Unchanged
+├── migrations/versions/
+│   ├── 0001_initial_schema.py     # Original 7 tables
+│   └── 0002_schema_mapping_and_data_model.py  # NEW — column_schemas, data_models, new columns
+├── catalog/
+│   ├── kpis.json                  # 99 BGO KPIs (collections, cx, sales, workforce, ops)
+│   └── templates/                 # 4 report templates
+└── agent/report_factory_agent/    # Google ADK 4-step agent (unchanged)
 ```
 
 ---
 
-## SQLite Schema
+## Frontend File Map
 
-4 tables. JSON stored as TEXT blobs. No ORM — raw SQL via `db/database.py`.
-
-```sql
-CREATE TABLE report_requests (
-    id            TEXT PRIMARY KEY,       -- UUID
-    created_by    TEXT DEFAULT 'dev',
-    template_type TEXT,
-    client_id     TEXT,
-    period_start  TEXT,
-    period_end    TEXT,
-    status        TEXT DEFAULT 'intake',  -- intake | mapping | computing | review | published
-    intake_spec   TEXT,                   -- JSON
-    column_mapping TEXT,                  -- JSON
-    computed_kpis TEXT,                   -- JSON
-    data_quality_flags TEXT,              -- JSON
-    chat_history  TEXT,                   -- JSON
-    file_path     TEXT,
-    created_at    TEXT DEFAULT (datetime('now')),
-    updated_at    TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE kpi_catalog (
-    kpi_id        TEXT PRIMARY KEY,
-    display_name  TEXT NOT NULL,
-    description   TEXT,
-    numerator     TEXT NOT NULL,
-    denominator   TEXT NOT NULL,
-    format        TEXT NOT NULL,          -- percentage | integer | currency | duration
-    domain        TEXT NOT NULL,          -- collections | cx | sales | hr | finance | ops
-    expected_range TEXT,                  -- JSON: {"min": 0, "max": 1}
-    aliases       TEXT,                   -- JSON array
-    source_fields TEXT,                   -- JSON array
-    reviewed      INTEGER DEFAULT 0
-);
-
-CREATE TABLE schema_memory (
-    client_id     TEXT NOT NULL,
-    template_type TEXT NOT NULL,
-    mappings      TEXT NOT NULL,          -- JSON
-    approved_by   TEXT,
-    use_count     INTEGER DEFAULT 0,
-    PRIMARY KEY (client_id, template_type)
-);
-
-CREATE TABLE review_queue (
-    id            TEXT PRIMARY KEY,
-    request_id    TEXT REFERENCES report_requests(id),
-    status        TEXT DEFAULT 'pending', -- pending | approved | approved_with_edits | rejected
-    reviewer_notes TEXT,
-    overrides     TEXT,                   -- JSON
-    reviewed_at   TEXT
-);
+```
+frontend/
+├── app/
+│   ├── upload/page.tsx                        # Multi-file upload → /schema-mapping/{id}
+│   ├── schema-mapping/[datasetId]/page.tsx    # NEW — AI schema review per file
+│   ├── data-modeling/[datasetId]/page.tsx     # NEW — Fact/dim + PK/FK review
+│   ├── interview/page.tsx                     # +skip button → /kpi-selection/{id}
+│   ├── kpi-selection/[datasetId]/page.tsx     # NEW — AI KPI ranking + custom KPIs
+│   ├── dimension-selection/[datasetId]/page.tsx # NEW — Dim columns only
+│   ├── recipe/[recipeId]/page.tsx             # Enhanced — chart type editor + formula validation
+│   └── profile/[uploadId]/page.tsx            # Legacy (kept for backward compat)
+├── components/
+│   ├── UploadZone.tsx             # Multi-file drag-drop (onFiles prop)
+│   ├── SchemaColumnTable.tsx      # NEW — 5-type badges, role dropdown, filter checkbox
+│   ├── KpiCard.tsx                # NEW — relevance bar + domain badge + toggle
+│   ├── ValidationPanel.tsx        # NEW — errors/warnings from ValidationResult
+│   ├── FormulaInput.tsx           # NEW — live formula validation with 500ms debounce
+│   └── ColumnTable.tsx            # Legacy (profile page)
+└── lib/
+    ├── api.ts                     # All new methods (uploadFiles, confirmSchema, suggestDataModel, etc.)
+    └── types.ts                   # All new interfaces (ColumnSchemaEntry, DataModelResponse, etc.)
 ```
 
 ---
 
-## API Routes
+## API Endpoints (complete)
 
 ```
-# Report lifecycle
-POST   /api/reports/                    Create request, return request_id
-GET    /api/reports/{id}                Get state + chat history
-POST   /api/reports/{id}/chat           Send message to intake agent
-POST   /api/reports/{id}/upload         Upload Excel file
-POST   /api/reports/{id}/confirm-mapping  Confirm or override column mapping
-GET    /api/reports/{id}/dashboard      Get computed KPIs + chart config JSON
+# Upload
+POST /upload                                     Multi-file → UploadBatchResponse
+GET  /upload/{upload_id}                         Single upload status
+GET  /upload/{upload_id}/profile                 Legacy profiling result
+GET  /upload/dataset/{dataset_id}                Poll all upload statuses
+GET  /upload/dataset/{dataset_id}/schema         AI schema suggestions for all files
+POST /upload/dataset/{dataset_id}/schema/confirm Apply user overrides, advance pipeline
 
-# Review queue
-GET    /api/review-queue                List pending items
-POST   /api/review-queue/{id}/approve   Approve (optionally with overrides)
-POST   /api/review-queue/{id}/reject    Reject with comment
+# Data Modeling
+POST /data-model/suggest                         AI fact/dim + PK/FK suggestion
+GET  /data-model/{dataset_id}                    Get DataModel
+POST /data-model/{dataset_id}/confirm            Apply overrides, advance pipeline
 
-# KPI catalog
-GET    /api/kpis                        List all KPIs
-GET    /api/kpis?domain={domain}        Filter by domain
+# Interview
+POST /interview                                  Chat turn
+POST /interview/skip                             Skip → advance to kpi_selection
+POST /interview/recipe                           Generate recipe from interview
+POST /interview/recipe/from-context             Generate recipe when interview skipped
+GET  /interview/recipe/{id}
+POST /interview/recipe/{id}/approve
 
-# Export
-GET    /api/reports/{id}/pptx           Download generated PPTX
+# KPI + Dimensions
+POST /kpi-suggestions                            AI-ranked catalog KPIs
+POST /kpi-suggestions/select                     Save selection + validate custom formulas
+GET  /dimensions/{dataset_id}                    Dim columns from dim tables only
+POST /dimensions/{dataset_id}/select             Save selection
+
+# Validation
+POST /validate/kpi-formula                       Live formula check (asteval)
+POST /validate/recipe                            Full recipe validation
+
+# KPI Catalog
+GET  /api/kpis                                   List + filter by domain/reviewed
+POST /api/kpis                                   Create custom KPI
+GET  /api/kpis/{id}
+POST /api/kpis/{id}/review                       Mark as reviewed
+
+# Reports + Review Queue
+POST /api/reports                                Create report request
+GET  /api/reports/{id}
+POST /api/reports/{id}/upload
+POST /api/reports/{id}/confirm-mapping
+GET  /api/reports/{id}/dashboard
+GET  /api/reports/review-queue/list
+POST /api/reports/review-queue/{id}/approve
+POST /api/reports/review-queue/{id}/reject
+GET  /api/reports/{id}/schema-memory
+
+# Health
+GET  /health
 ```
 
 ---
 
-## Week 1 — Backend + Agent Steps 1 & 2
+## Data Validation Coverage
 
-**Checkpoint:** Full intake conversation in Postman → upload Excel → column mapping draft returned.
-
-### Infrastructure & Schema
-- [~] FastAPI app running — **exists, but built on old 7-table Alembic schema; replace with `db/schema.sql` + raw SQLite via `db/database.py`**
-- [x] SQLite database (switched from MySQL)
-- [x] Local file storage (`/uploads` fallback in `services/storage.py`)
-- [ ] Drop Alembic; replace with `db/schema.sql` applied on startup via `database.py`
-- [ ] `seed_catalog.py` — loads `catalog/kpis.json` into `kpi_catalog` table on first run
-
-### KPI Catalog (BGO IP — get right from day one)
-- [ ] `catalog/kpis.json` — seed with ~50 BGO KPIs (collections, CX, HR, finance, ops)
-  - 3 starter KPIs already defined in PRD3: `contact_rate`, `ptp_rate`, `ptp_kept_rate`
-  - Remaining ~47 to be sourced from central data team's existing Power BI / Excel reports
-- [ ] Catalog format locked: `kpi_id`, `display_name`, `numerator`, `denominator`, `format`, `domain`, `expected_range`, `aliases`, `source_fields`, `reviewed`
-- [ ] `GET /api/kpis` and `GET /api/kpis?domain=` endpoints
-
-### Template JSON Files
-- [ ] `catalog/templates/client_health.json` — required/optional KPIs, required dimensions, chart configs
-- [ ] `catalog/templates/wbr_qbr.json`
-- [ ] `catalog/templates/exec_scorecard.json`
-- [ ] `catalog/templates/kpi_spotlight.json`
-
-### ADK Agent — Setup
-- [ ] `pip install google-adk` added to `requirements.txt`
-- [ ] `agent/report_factory_agent/agent.py` — root ADK agent definition with Claude as model, 4 `FunctionTool` tools registered
-- [ ] `adk web` verified working locally (trace UI at localhost:8001)
-- [ ] `adk api_server` integrated with FastAPI — `POST /api/reports/{id}/chat` proxies to ADK
-
-### Agent Step 1 — Intake (`tools/intake.py`)
-- [~] Claude conversation loop exists (`services/ai_interview.py`) — **needs to be replaced with ADK `FunctionTool` pattern; template-driven instead of free-form**
-- [ ] `run_intake(template_type, client_id, period_start, period_end, kpi_list)` → validates inputs against catalog, returns `intake_spec`
-- [ ] Template selected → load template JSON schema into agent context
-- [ ] KPI list validated against `kpi_catalog` (only `reviewed=1` KPIs used in auto-mapping)
-- [ ] `intake_spec` written to `report_requests` record; status → `mapping`
-
-### Agent Step 2 — Data Discovery (`tools/data_discovery.py`)
-- [~] Excel parsing via pandas exists (`services/parser.py`) — **keep logic, restructure as ADK tool**
-- [~] Column type detection exists (`services/profiler.py`) — **repurpose: fuzzy-match headers against `source_fields` and `aliases` from catalog, not general profiling**
-- [ ] `parse_excel(file_path)` → headers + 5 sample rows + row count
-- [ ] `auto_map_columns(headers, kpi_list, kpi_catalog)` → `{kpi_id: {raw_column, confidence, needs_review}}` using `difflib.SequenceMatcher`; anything below 0.7 flagged
-- [ ] `column_mapping` draft written to `report_requests`; status → `mapping`
-- [ ] `POST /api/reports/{id}/upload` — saves file to `/uploads/{request_id}/`, triggers Step 2
+| Stage | Validation | Blocking? |
+|-------|-----------|----------|
+| File drop (client) | Extension, size ≤ 50MB | Yes |
+| `POST /upload` | Encoding, header row, magic bytes | Yes (400) |
+| Schema confirm | Duplicate column names; fact table needs ≥1 date + ≥1 measure | Error blocks |
+| Data model confirm | Circular FK; referential integrity < 90% | Warning only |
+| Custom KPI entry (live) | Formula syntax + column existence via asteval (FormulaInput) | Live feedback |
+| `POST /kpi-suggestions/select` | All custom KPI formulas validated server-side | 422 |
+| Recipe approve | hasFormulaErrors() check client-side; recipe validation endpoint | Blocks approve |
+| Dashboard refresh | detect_schema_drift() on re-upload | Warning banner |
 
 ---
 
-## Week 2 — Steps 3 & 4 + Review Queue + Schema Memory
+## Database Schema
 
-**Checkpoint:** Full loop via API only — intake → upload → confirm mapping → chart JSON → PPTX download → approve in review queue.
+### Original tables (db/schema.sql)
+- `report_requests` — PRD3 report state machine
+- `kpi_catalog` — 99 BGO KPIs (seeded by `seed_catalog.py`)
+- `schema_memory` — client × template mapping cache
+- `review_queue` — pending approvals
+- `agent_log` — ADK step trace
 
-### Agent Step 3 — Standardise & Compute (`tools/standardise.py`)
-- [~] KPI formula evaluation exists (`services/kpi_engine.py`) — **replace free-form `asteval` with catalog-driven numerator ÷ denominator**
-- [ ] `POST /api/reports/{id}/confirm-mapping` — accepts user overrides, triggers Step 3
-- [ ] `compute_kpis(file_path, column_mapping, kpi_catalog, kpi_list)` → `{kpi_id: {value, flags}}`
-- [ ] Range validation against `expected_range` from catalog — flags are non-blocking
-- [ ] Division-by-zero guard
-- [ ] `computed_kpis` + `data_quality_flags` written to `report_requests`; status → `computing` → `review`
-- [ ] ADK traces visible in `adk web` for this step (inputs, outputs, latency)
-
-### Agent Step 4 — Generate (`tools/generate.py`)
-- [ ] Build chart-ready JSON from `computed_kpis` + template `charts` config
-- [ ] `GET /api/reports/{id}/dashboard` — returns chart JSON for frontend
-- [ ] PPTX export (`exporters/pptx_exporter.py`) — python-pptx against BGO slide master
-- [ ] `GET /api/reports/{id}/pptx` — triggers export, streams file
-- [ ] Review queue entry written; status → `review`
-
-### Review Queue
-- [~] Basic approve/reject endpoints exist (`api/routes/interview.py`) — **rebuild under new schema; add approve-with-edits and KPI value overrides**
-- [ ] `GET /api/review-queue` — list pending items with template, client, period, flags summary
-- [ ] `POST /api/review-queue/{id}/approve` — publishes dashboard, saves mapping to `schema_memory`, increments `use_count`
-- [ ] `POST /api/review-queue/{id}/approve` with `overrides` body — override specific KPI values before publishing
-- [ ] `POST /api/review-queue/{id}/reject` — reject with comment; status → `rejected`
-
-### Schema Memory
-- [ ] On approve: write `(client_id, template_type, mappings)` to `schema_memory`
-- [ ] On Step 2 start: check `schema_memory` for `(client_id, template_type)` — if found, pre-fill mapping and skip fuzzy match; present stored mapping for one-click confirm
-- [ ] `use_count` incremented on each recall
-- [ ] Auto-approval path (Phase 1.5): design constraint — schema_memory structure must support it from day one (conditions: stored mapping exists + headers match exactly + all KPIs in range + no flags). Do not build the auto-approval gate yet; do not break the path to it.
+### SQLAlchemy ORM tables (migrations/0001 + 0002)
+- `datasets` — +pipeline_stage, +pipeline_context
+- `uploads` — +schema_mapping_status
+- `staging_tables`, `report_recipes`, `kpi_definitions`, `dashboard_configs`, `processed_tables`
+- `column_schemas` — **NEW** (migration 0002)
+- `data_models` — **NEW** (migration 0002)
 
 ---
 
-## Week 3 — Frontend + Pilot
+## Running migrations
 
-**Checkpoint:** Demo to leadership. MVP exit gate signed off.
-
-### Frontend Migration
-- [~] Upload + profiling UI exists in Next.js — **migrate to React + Vite; keep upload/profile components, connect to new API routes**
-- [~] Interview chat UI exists in Next.js — **migrate; reconnect to ADK-backed `/api/reports/{id}/chat`**
-- [ ] Scaffold React + Vite app (`npm create vite@latest frontend -- --template react`)
-- [ ] React Router for client-side routing
-
-### Screen: Library (`pages/Library.jsx`)
-- [ ] Grid of user's `report_requests` — card per report showing template, client, period, status badge
-- [ ] Status badges: Intake / Mapping / Computing / Review / Published
-- [ ] Filter by template type and client
-- [ ] "New Report" button → `/intake`
-
-### Screen: Intake Chat (`pages/Intake.jsx`)
-- [~] Chat UI exists (Next.js) — **migrate; wire to `POST /api/reports/{id}/chat`**
-- [ ] Progress stepper: Intake → Mapping → Computing → Review → Done
-- [ ] Inline KPI checklist when agent asks about metrics (loaded from `GET /api/kpis`)
-- [ ] File upload dropzone appears when agent asks for data source
-- [ ] On intake complete: redirect to `/mapping/{id}`
-
-### Screen: Mapping Confirmation (`pages/MappingConfirm.jsx`)
-- [~] Column table exists (Next.js `ColumnTable.tsx`) — **migrate; replace profile-based display with KPI mapping display**
-- [ ] Table: raw column | matched KPI | confidence score | override dropdown
-- [ ] Red highlight for confidence < 0.7 or missing required KPI
-- [ ] "Confirm mapping" → `POST /api/reports/{id}/confirm-mapping` → triggers Step 3
-
-### Screen: Dashboard View (`pages/Dashboard.jsx`)
-- [ ] Full-page Recharts render driven by `GET /api/reports/{id}/dashboard` chart JSON
-- [ ] Template-driven layout (line charts for trends, bar for breakdowns, KPI tiles)
-- [ ] Filter bar: date range, agent, site (template-dependent)
-- [ ] Data quality flags shown as inline yellow warnings
-- [ ] "Export PPTX" button → `GET /api/reports/{id}/pptx`
-
-### Screen: Review Queue (`pages/ReviewQueue.jsx`)
-- [ ] List view: pending items with template, client, period, requester, timestamp
-- [ ] Detail view: KPI mapping table (raw column → KPI → value → confidence → flags), dashboard preview, PPTX link
-- [ ] Approve / Approve with edits (override KPI values inline) / Reject with comment
-
-### Pilot (3 real reports)
-- [ ] 3 reports across at least 2 internal teams using real BGO Excel data
-- [ ] Review queue exercised by central data team reviewer
-- [ ] Schema memory tested: second run for same client + template skips mapping step
-- [ ] Before/after time noted (vs. current ticket queue)
+```bash
+cd backend
+alembic upgrade head
+```
 
 ---
 
-## Platform Reusability Gate (end of Week 3 — before MVP locks)
+## Open Questions (from PRD3)
 
-Walk through these two use cases on paper against the ADK skill manifest format and connector pattern. If either surfaces a gap, fix before the MVP exit gate.
-
-**Hunter Point Capital:** Files from SharePoint + email → standardise → validate Excel formulas → compare to prior month → upload to DealCloud via API. Questions: does the ADK `FunctionTool` pattern describe this workflow without modification? Can SharePoint and DealCloud be added as connectors without changing the base interface? Does "validation passed, ready to upload" fit the review queue state model?
-
-**Voice collections agent:** Real-time debtor conversation, FDCPA-compliant scripting, intent detection, payment capture, post-call summary. Questions: does the skill manifest support voice tools (Deepgram, ElevenLabs) the same way it supports text tools? Are compliance guardrails expressible at the platform level, not buried in the skill?
-
----
-
-## MVP Exit Gate
-
-- [ ] Dev can clone repo and run the full app in under one hour with no external services
-- [ ] Agent completes the full loop for at least 3 reports with real BGO Excel data
-- [ ] Client Health Dashboard template renders correctly in-app
-- [ ] Review queue works: approve, reject, and approve-with-edits all function
-- [ ] Schema memory saves on approval and skips mapping step on second run for same client
-- [ ] PPTX export produces a valid file using the BGO slide master
-- [ ] ADK traces visible in `adk web` for every step with latency — enough to debug any failure
-- [ ] Platform reusability gate passed (Hunter Point + voice agent walkthroughs)
+1. BGO PowerPoint slide master file — needed for PPTX export
+2. Central data team pilot reviewer — needed for review queue testing
+3. Remaining KPI definitions from data team (currently 99 seeded)
+4. Anthropic API key — shared or individual?
+5. `client_id` naming convention
+6. Workday: Excel export for MVP or API access?
+7. Hunter Point data schema differences (Sprint 3 gate)
 
 ---
 
-## Production Migration (after MVP exit gate)
+## Next Steps
 
-Same code. Infrastructure swap only. Do in order; test after each step.
-
-1. **SQLite → PostgreSQL:** change `DATABASE_URL`. SQLAlchemy (or raw psycopg2) handles the rest.
-2. **Local storage → S3:** update `save_file()` and `get_file()` in storage helpers only.
-3. **ADK local → ADK on ECS:** point ADK deployment config at ECS Fargate instead of `adk api_server` local. Agent code unchanged.
-4. **Langfuse:** replace `adk web` with Langfuse trace exporter — one config line. Reviewer approve/reject feeds Langfuse eval dataset.
-5. **SSO:** add FastAPI middleware + BGO SSO provider config.
-
----
-
-## Open Questions
-
-| # | Question | Owner | Needed by |
-|---|---|---|---|
-| 1 | Can we get the BGO PowerPoint slide master as a `.pptx` file? | Marketing / Data team | Week 1 |
-| 2 | Who on the central data team is the Phase 1 pilot reviewer? | Data team lead | Week 2 |
-| 3 | Which ~50 KPIs seed the catalog? Can existing Power BI / Excel files be used as reference? | Data team | Week 1 |
-| 4 | Anthropic API key — shared team account or individual dev keys for MVP? | Platform lead | Day 1 |
-| 5 | `client_id` naming convention — must be consistent for schema memory keys | Data team | Week 1 |
-| 6 | Executive Scorecard: can Workday data be exported to Excel for MVP, or is API access needed from day one? | Workday admin | Week 2 |
-| 7 | Hunter Point data schema — deal IDs, PortCo identifiers, financial metrics — different enough to require platform-level changes to the skill manifest format? | Hunter Point lead + Platform | Sprint 3 |
+- [ ] Run `alembic upgrade head` to apply migration 0002
+- [ ] Run `python seed_catalog.py` to populate kpi_catalog
+- [ ] Set `ANTHROPIC_API_KEY` in `.env`
+- [ ] Test full pipeline with real BGO Excel data (both interview + skip paths)
+- [ ] Wire up AI enhancement passes in schema_mapper + data_modeler + kpi_suggester (use_ai=True)
+- [ ] Build dashboard view page (`app/dashboard/[recipeId]/page.tsx`)
+- [ ] Implement PPTX export endpoint + download button in recipe page
+- [ ] Migrate frontend from Next.js 16 to React + Vite (per PROJECT_PLAN Week 3)

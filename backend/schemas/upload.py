@@ -8,9 +8,15 @@ class UploadResponse(BaseModel):
     dataset_id: int
     filename: str
     status: str
+    schema_mapping_status: str = "pending"
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class UploadBatchResponse(BaseModel):
+    dataset_id: int
+    uploads: list[UploadResponse]
 
 
 class ColumnProfile(BaseModel):

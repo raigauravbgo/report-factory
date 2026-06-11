@@ -14,6 +14,8 @@ class Upload(Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     # pending | profiling | profiled | failed
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    # pending | ai_suggested | confirmed
+    schema_mapping_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
