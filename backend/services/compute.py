@@ -14,17 +14,44 @@ from core.database import engine
 logger = logging.getLogger(__name__)
 
 
+def _find_time_key_col(table_name: str) -> "str | None":
+    """Return the first time_key-tagged column name for a staging table from its profile_data.
+
+    Used to remap a table's date column when it doesn't match the recipe's date_column.
+    Queries the DB — called only when a table is actually missing the expected date column.
+    """
+    from core.database import SessionLocal
+    from models.staging_table import StagingTable
+    db = SessionLocal()
+    try:
+        st = db.query(StagingTable).filter(StagingTable.table_name == table_name).first()
+        if not st or not st.profile_data:
+            return None
+        for col in st.profile_data.get("columns", []):
+            if col.get("semantic_tag") == "time_key":
+                return col["name"]
+        return None
+    finally:
+        db.close()
+
+
 def _load_staging_df(
     table_name: "str | list[str]",
     confirmed_relationships: "list[dict] | None" = None,
     upload_table_map: "dict[str, str] | None" = None,
     filter_cols: "list[str] | None" = None,
+    date_column: "str | None" = None,
 ) -> pd.DataFrame:
     """Load one or more staging tables.
 
     When confirmed PK/FK relationships exist, JOIN the fact table to dimension
     tables using those relationships.  Without relationships (or for same-grain
     files), fall back to pd.concat so columns from all files are available.
+
+    When date_column is provided and a table is missing that column, the function
+    looks up the table's profile_data for a time_key-tagged column and renames it
+    so QA/grading tables with different date column names (e.g. date_graded instead
+    of date) still contribute rows to time-series charts.
 
     Parameters
     ----------
@@ -33,10 +60,27 @@ def _load_staging_df(
     upload_table_map       : from recipe_config["upload_table_map"] — maps
                              filename → staging table name so relationship
                              file_a/file_b names resolve to physical tables
+    date_column            : recipe date column name; triggers per-table remapping
+                             when a table uses a different column for its date
     """
     names = [table_name] if isinstance(table_name, str) else list(table_name)
     with engine.connect() as conn:
-        dfs = [pd.read_sql_table(n, con=conn) for n in names if n]
+        dfs = []
+        for n in names:
+            if not n:
+                continue
+            chunk = pd.read_sql_table(n, con=conn)
+            # If this table is missing the recipe's date column, find the time_key
+            # column from profile_data and rename it so the rows get a date after concat.
+            if date_column and date_column not in chunk.columns:
+                time_key = _find_time_key_col(n)
+                if time_key and time_key in chunk.columns:
+                    chunk = chunk.rename(columns={time_key: date_column})
+                    logger.info(
+                        "_load_staging_df: remapped %r → %r for table %s",
+                        time_key, date_column, n,
+                    )
+            dfs.append(chunk)
     if not dfs:
         return pd.DataFrame()
     if len(dfs) == 1:
@@ -813,6 +857,7 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
         confirmed_relationships=_confirmed_rels or None,
         upload_table_map=_upload_table_map or None,
         filter_cols=list(filters.keys()) if filters else None,
+        date_column=recipe_config.get("date_column"),
     )
     if df.empty:
         return {"kpi_summaries": [], "time_series": [], "breakdown": []}
