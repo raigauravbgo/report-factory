@@ -148,6 +148,41 @@ def get_dashboard_data(
         if k not in reserved and v
     }
 
+    # For multi-file recipes generated before the sessionStorage fix, confirmed_relationships
+    # may be empty even though detectable JOINs exist.  Auto-infer them at query time so
+    # row-level filters produce correct results instead of nulling out all KPI values.
+    if (
+        active_filters
+        and not config.get("confirmed_relationships")
+        and len(all_table_names) > 1
+        and config.get("dataset_id")
+        and config.get("upload_table_map")
+    ):
+        from services.schema_relationships import infer as _infer_rels
+        try:
+            inferred = _infer_rels(config["dataset_id"], db)
+            pk_fk = [
+                {
+                    "relationship_type": r.relationship_type,
+                    "file_a": r.file_a,
+                    "col_a": r.col_a,
+                    "file_b": r.file_b,
+                    "col_b": r.col_b,
+                    "confidence": r.confidence,
+                }
+                for r in inferred
+                if r.relationship_type == "pk_fk" and r.confidence >= 0.7
+            ]
+            if pk_fk:
+                config = {**config, "confirmed_relationships": pk_fk}
+                logger.info(
+                    "AUTO_REL recipe_id=%d inferred %d pk_fk relationships for filtered query",
+                    recipe_id,
+                    len(pk_fk),
+                )
+        except Exception as _e:
+            logger.warning("AUTO_REL recipe_id=%d failed to infer: %s", recipe_id, _e)
+
     t0 = time.perf_counter()
     try:
         result = compute_dashboard(

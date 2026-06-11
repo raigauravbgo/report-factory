@@ -662,7 +662,7 @@ export default function DashboardPage() {
               { label: "Date Column", value: config.date_column },
               { label: "Granularity", value: config.granularity },
               { label: "Dimensions", value: config.dimensions.join(", ") || "—" },
-              { label: "Filters", value: config.filters.join(", ") || "None" },
+              { label: "Filters", value: Object.keys(filterOptions).join(", ") || "None" },
             ].map((item) => (
               <div key={item.label} className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
                 <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">{item.label}</p>
