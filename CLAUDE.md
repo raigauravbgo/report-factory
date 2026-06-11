@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **BGO Report Factory** — a self-service BI tool that lets operations users (Ops Managers, Team Leads, Program Managers) upload multiple Excel/CSV files and generate story-driven dashboards without relying on a centralised Power BI team.
 
-The working end-to-end flow (single-file upload → AI interview → dashboard) is complete. Active work expands this into a multi-file pipeline: deep profiling, schema relationship detection, hybrid AI interview (Flow 1), checkable KPI selection, data validation, and story-driven dashboard generation.
+Both the single-file and multi-file pipelines are end-to-end complete. The multi-file flow covers: deep profiling → schema relationship detection → hybrid AI interview (Flow 1) → KPI selection → dimension selection → data validation → story-driven dashboard generation.
 
 **Reference documents:**
 - [PRD3.md](PRD3.md) — product requirements (single source of truth)
@@ -18,36 +18,43 @@ The working end-to-end flow (single-file upload → AI interview → dashboard) 
 
 | Layer | Technology | Notes |
 |---|---|---|
-| Frontend | Next.js 16 App Router | Port 3000 |
-| Backend | FastAPI (Python) | Port 8000 |
-| Agent framework | Google ADK 2.1.0 | Python-only; no GCP/AWS dependency |
+| Frontend | Next.js 16 App Router, React 19, TypeScript 5, Tailwind CSS 4 | Port 3000 |
+| Backend | FastAPI 0.136, Python | Port 8000 |
+| Agent framework | Google ADK 2.1.0 + LiteLLM 1.85 | Python-only; LiteLLM routes OpenAI calls inside ADK |
+| ORM / migrations | SQLAlchemy 2.0 + Alembic | |
 | Database | SQLite (dev) → PostgreSQL (prod) | `DATABASE_URL` in `.env` |
-| File storage | Local `backend/local_uploads/` (dev) | Railway Volume in prod |
-| AI — default | OpenAI `gpt-4o-mini` | `LLM_PROVIDER=openai` |
+| File storage | Local `backend/local_uploads/` (dev) | S3 via boto3 (prod); `S3_BUCKET` in `.env` |
+| AI — default | OpenAI `gpt-4o-mini` | `LLM_PROVIDER=openai`; `config.py` defaults to `gpt-4o`, override via `OPENAI_MODEL` |
 | AI — alternate | Anthropic `claude-sonnet-4-20250514` | `LLM_PROVIDER=anthropic` |
-| Charts | Recharts | |
-| Export | openpyxl (Excel) + python-pptx (PPTX) | |
-| Deployment | Railway | No AWS or GCP dependencies |
+| AI — azure | Azure OpenAI | `LLM_PROVIDER=azure`; `USE_AZURE_OPENAI=true` |
+| Charts | Recharts 3.8 | |
+| Export | openpyxl 3.1 (Excel) + python-pptx 1.0 (PPTX) | |
+| Deployment | Railway | No direct GCP dependency |
 
 ---
 
 ## LLM Provider Switching
 
-All AI calls go through `backend/services/ai_client.py`. Switch providers via `.env` only — no code change required.
+All AI calls go through `backend/services/ai_client.py`. Three providers supported — switch via `.env` only, no code change required.
 
 ```
-LLM_PROVIDER=openai           # or: anthropic
+LLM_PROVIDER=openai           # or: anthropic | azure
 OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4o-mini      # config.py code-default is gpt-4o; always set this in .env
 ANTHROPIC_API_KEY=...
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
+# Azure OpenAI (optional)
+USE_AZURE_OPENAI=true
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_ENDPOINT=...
+AZURE_OPENAI_DEPLOYMENT=...
 ```
 
 Never call `openai.*` directly outside `ai_client.py`.
 
 ---
 
-## 8-Step Pipeline
+## 9-Step Pipeline
 
 ```
 1. Multi-File Upload         POST /upload/batch — CSV + Excel simultaneously (up to 10 files)
@@ -55,12 +62,13 @@ Never call `openai.*` directly outside `ai_client.py`.
 3. Schema Mapping            AI auto-classifies Dimension/Measure/Date/Key + grain; user editable
 4. Relationship Detection    fuzzy column match, value overlap, cardinality across files
 5. AI Interview (Flow 1)     side-panel chatbot — Q1 hard-coded, Q2+ dynamic from column profile
-6. KPI Suggestion            scrollable checkable list, semantic match against KPI registry
-7. Data Validation           zero-value, null %, division-risk checks before dashboard
-8. Dashboard Generation      story-driven sections via template; chart type editable per tile
+6. KPI Suggestion            scrollable checkable list, AI-first match then catalog fallback (≥0.55)
+7. Dimension Selection       user picks which dimension columns drive breakdown charts
+8. Data Validation           zero-value, null %, division-risk checks before dashboard
+9. Dashboard Generation      story-driven sections via AI grouping; chart type editable per tile
 ```
 
-Interview (Step 5) is **optional** — user may skip directly to KPI selection.
+Interview (Step 5) is **optional** — user may skip directly to KPI selection (`POST /session/{id}/interview/skip`).
 
 ---
 
@@ -94,17 +102,29 @@ CSV encoding: always use `chardet` + `csv.Sniffer` — never assume comma-separa
 report-factory/
 ├── backend/
 │   ├── main.py                           FastAPI app
-│   ├── agent/report_factory_agent/       ADK agent + 6 tools
-│   ├── api/routes/                       upload, interview, kpis, reports, dashboard
+│   ├── agent/report_factory_agent/       ADK agent + 6 tools (intake, define_kpi, data_discovery,
+│   │                                     data_discovery_from_upload, standardise, generate)
+│   ├── api/routes/                       upload, interview, kpis, reports, dashboard, session, log
 │   ├── catalog/
-│   │   ├── kpis.json                     69 KPI definitions
+│   │   ├── kpis.json                     86 KPI definitions
 │   │   └── templates/                    4 templates (client_health, wbr_qbr, exec_scorecard, kpi_spotlight)
 │   ├── core/                             config.py, database.py
-│   ├── models/                           SQLAlchemy ORM (Dataset, Upload, StagingTable, ReportRecipe, ...)
-│   ├── services/                         ai_interview, ai_client, parser, profiler, compute, recipe_generator, ...
-│   │   ├── schema_relationships.py       NEW — cross-file join/FK inference
-│   │   ├── kpi_suggester.py              NEW — catalog fuzzy match + interview boost
-│   │   └── data_validator.py             NEW — pre-dashboard data quality checks
+│   ├── models/                           SQLAlchemy ORM
+│   │                                     Dataset, Upload, StagingTable, ReportRecipe,
+│   │                                     ProcessedTable, KpiDefinition, DashboardConfig
+│   ├── services/
+│   │   ├── ai_client.py                  OpenAI / Anthropic / Azure abstraction
+│   │   ├── ai_interview.py               Flow 1 hybrid interview
+│   │   ├── adk_runner.py                 ADK agent orchestration (Flow 2, disabled by default)
+│   │   ├── parser.py                     CSV + Excel ingestion
+│   │   ├── profiler.py                   column type detection, grain_score, semantic_tag
+│   │   ├── schema_relationships.py       cross-file FK/join inference
+│   │   ├── kpi_suggester.py              AI-first KPI identification + catalog fallback
+│   │   ├── data_validator.py             pre-dashboard data quality checks
+│   │   ├── compute.py                    formula execution + cross-file JOINs
+│   │   ├── recipe_generator.py           LEGACY — single-file only; superseded by session_generator
+│   │   ├── session_generator.py          multi-file story-driven recipe generation
+│   │   └── storage.py                    local/S3 file storage abstraction
 │   ├── exporters/pptx_exporter.py
 │   ├── requirements.txt
 │   └── .env.example
@@ -112,18 +132,32 @@ report-factory/
     ├── app/
     │   ├── upload/page.tsx               Multi-file batch upload + per-file status
     │   ├── session/[datasetId]/
-    │   │   ├── schema/page.tsx           NEW — per-file schema mapping UI
-    │   │   ├── interview/page.tsx        NEW — hybrid Flow 1 chatbot
-    │   │   └── kpis/page.tsx             NEW — checkable KPI list
+    │   │   ├── schema/page.tsx           per-file schema mapping UI
+    │   │   ├── interview/page.tsx        hybrid Flow 1 chatbot
+    │   │   ├── kpis/page.tsx             checkable KPI list
+    │   │   └── dimensions/page.tsx       dimension selection for breakdown charts
     │   ├── dashboard/[recipeId]/page.tsx Story-driven sections + chart type switcher
-    │   └── ...existing pages unchanged
+    │   ├── interview/page.tsx            legacy single-file interview
+    │   ├── profile/[uploadId]/page.tsx   legacy single-file profile view
+    │   ├── recipe/[recipeId]/page.tsx    legacy single-file recipe view
+    │   ├── reports/[reportId]/page.tsx   report detail view
+    │   └── review-queue/page.tsx         ops review queue
     ├── components/
     │   ├── UploadZone.tsx                maxFiles: 10, onFiles callback
-    │   ├── ColumnTable.tsx               + semantic_tag + grain columns
-    │   └── SchemaRelationships.tsx       NEW — relationship card display
+    │   ├── ColumnTable.tsx               semantic_tag + grain columns
+    │   ├── SchemaRelationships.tsx       relationship card display
+    │   ├── filters/FilterBar.tsx         dashboard filter bar
+    │   ├── layout/DarkSidebar.tsx        app sidebar
+    │   ├── ui/ChartCard.tsx              chart tile wrapper
+    │   ├── ui/InsightPanel.tsx           narrative insight panel
+    │   ├── ui/SectionHeader.tsx          dashboard section header
+    │   ├── ui/TrendBadge.tsx             metric trend indicator
+    │   └── kpis/KpiSummaryCard.tsx       KPI summary card
     └── lib/
-        ├── api.ts                        + batch upload + session endpoints
-        └── types.ts                      + BatchUploadResponse, extended ColumnProfile
+        ├── api.ts                        batch upload + session endpoints
+        ├── types.ts                      BatchUploadResponse, extended ColumnProfile
+        ├── format.ts                     number/date formatting utilities
+        └── logger.ts                     frontend logging
 ```
 
 ---
@@ -132,9 +166,9 @@ report-factory/
 
 **Profiling:** `services/profiler.py` — heuristic column type detection, `grain_score` (`unique_count / row_count`), pattern-based `semantic_tag`. User overrides in schema mapping UI; saved back to `StagingTable.profile_data`.
 
-**KPI matching:** `services/kpi_suggester.py` — `SequenceMatcher` against `source_fields` + `aliases` in `catalog/kpis.json`. Confidence < 0.7 = manual dropdown fallback.
+**KPI matching:** `services/kpi_suggester.py` — AI-first: sends column names + sample rows to LLM; LLM returns full KPI dicts with formula, aggregation, format. `SequenceMatcher` against `catalog/kpis.json` is used only as fallback when AI fails (threshold 0.55). Supports AI-generated custom KPIs not in catalog.
 
-**Recipe → Dashboard:** `services/recipe_generator.py` groups KPIs into story sections (Overview / Performance Trends / Breakdown / Data Quality) via AI prompt. `services/compute.py` executes formulas against staging data, with optional cross-file JOIN if relationships confirmed.
+**Recipe → Dashboard:** `services/session_generator.py` (multi-file flow) groups KPIs into story sections (Overview / Performance Trends / Breakdown Analysis / Data Quality) via AI prompt, then falls back to a single "Dashboard Overview" section if AI fails. `services/recipe_generator.py` is **legacy** — single-file only, not used in the multi-file flow. `services/compute.py` executes formulas against staging data, with cross-file LEFT JOIN when `confirmed_relationships` contain `pk_fk` entries.
 
 **Schema memory:** On recipe approval, column mappings saved to `schema_memory` (keyed by `client_id + template_type`). Second run with same client + template skips fuzzy matching.
 
@@ -144,37 +178,57 @@ report-factory/
 
 ```
 # Upload
-POST   /upload                            Single file (keep for backwards compatibility)
+POST   /upload                            Single file (backwards compatibility)
 POST   /upload/batch                      Batch multi-file upload → returns dataset_id + upload list
 GET    /upload/{id}                       Poll profiling status
 GET    /upload/{id}/profile               Column profile data
 POST   /upload/{id}/schema                Save user schema overrides
 
-# Session (new multi-file flow)
+# Session (multi-file flow)
 POST   /session/{id}/relationships        Infer cross-file relationships
 POST   /session/{id}/interview            Flow 1 hybrid interview
 GET    /session/{id}/interview/state      Interview step + collected answers
+POST   /session/{id}/interview/skip       Skip interview → default result
 POST   /session/{id}/kpi-suggestions      Suggest KPIs from catalog + interview
+GET    /session/{id}/dimensions           List dimension columns across all uploads
 POST   /session/{id}/validate             Pre-dashboard data validation
 POST   /session/{id}/generate             Create recipe + navigate to dashboard
 
-# Interview + Recipe (existing)
+# Interview + Recipe (legacy single-file)
 POST   /interview                         ADK primary + OpenAI fallback
 POST   /interview/recipe
 GET    /interview/recipe/{id}
 POST   /interview/recipe/{id}/approve
 
-# Dashboard (existing)
+# Dashboard
 GET    /api/dashboard/{id}/data
 GET    /api/dashboard/{id}/filter-values
 GET    /api/dashboard/{id}/export/excel
 GET    /api/dashboard/{id}/export/pptx
+GET    /api/dashboard/{id}/validate-config   Pre-flight data integrity check
+POST   /api/dashboard/{id}/validate-formula  Test-compute a single KPI formula
+PATCH  /api/dashboard/{id}/config            Update mutable recipe config fields
 
-# KPI Catalog + Review Queue (existing)
+# KPI Catalog
 GET/POST /api/kpis
-GET      /api/reports/review-queue/list
-POST     /api/reports/review-queue/{id}/approve
-POST     /api/reports/review-queue/{id}/reject
+GET      /api/kpis/{id}
+POST     /api/kpis/{id}/review               Mark KPI as reviewed/un-reviewed
+
+# Reports + Review Queue
+POST   /api/reports                          Create report
+GET    /api/reports                          List reports
+GET    /api/reports/{id}                     Get report by ID
+POST   /api/reports/{id}/upload              Upload file to report
+POST   /api/reports/{id}/confirm-mapping     Confirm column mapping
+GET    /api/reports/{id}/dashboard           Get dashboard for report
+GET    /api/reports/{id}/schema-memory       Check schema memory hit
+GET    /api/reports/review-queue/list
+GET    /api/reports/review-queue/{id}/new-kpis  Unreviewed KPIs for review entry
+POST   /api/reports/review-queue/{id}/approve
+POST   /api/reports/review-queue/{id}/reject
+
+# Logging
+POST   /api/log/event                        Log frontend events
 ```
 
 ---
