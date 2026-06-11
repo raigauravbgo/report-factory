@@ -161,18 +161,26 @@ export default function DashboardPage() {
     setZoomState((z) => { const n = { ...z }; delete n[kpiName]; return n; });
   }
 
-  // Initial load — recipe metadata + filter option values
+  // Initial load — recipe metadata only
   useEffect(() => {
-    Promise.all([
-      api.getRecipe(Number(recipeId)),
-      fetch(`${BASE_URL}/api/dashboard/${recipeId}/filter-values`).then((r) => r.ok ? r.json() : {}),
-    ])
-      .then(([recipe, opts]) => {
-        setApprovedAt(recipe.approved_at);
-        setFilterOptions(opts as Record<string, string[]>);
-      })
+    api.getRecipe(Number(recipeId))
+      .then((recipe) => setApprovedAt(recipe.approved_at))
       .catch(() => {});
   }, [recipeId]);
+
+  // Re-fetch filter options whenever active filters change (Power BI-style cascading).
+  // Each dropdown's options are computed server-side with all OTHER active filters applied,
+  // so e.g. selecting location=India narrows the department dropdown to India's departments.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    Object.entries(activeFilters).forEach(([k, v]) => { if (v) params.set(k, v); });
+    const url = `${BASE_URL}/api/dashboard/${recipeId}/filter-values${params.size ? `?${params}` : ""}`;
+    fetch(url)
+      .then((r) => r.ok ? r.json() : {})
+      .then((opts) => setFilterOptions(opts as Record<string, string[]>))
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipeId, activeFilters]);
 
   // Fetch dashboard data — re-runs whenever activeFilters or activeGranularity changes
   useEffect(() => {
@@ -395,12 +403,18 @@ export default function DashboardPage() {
         {/* Story sections (new multi-file recipes) or flat layout (legacy backward-compat) */}
         {config.sections && config.sections.length > 0 ? (
           config.sections.map((section) => {
-            const sectionTimeSeries = time_series.filter((ts) =>
-              section.kpis.includes(ts.kpi),
-            );
-            const sectionBreakdown = breakdown.filter((bk) =>
-              section.kpis.includes(bk.kpi),
-            );
+            // Respect chart_type to prevent cross-section duplication:
+            //   kpi_card → scorecards already shown at top; render no charts here
+            //   line     → time-series trends only
+            //   bar      → breakdown bar charts only
+            const sectionTimeSeries =
+              section.chart_type === "line"
+                ? time_series.filter((ts) => section.kpis.includes(ts.kpi))
+                : [];
+            const sectionBreakdown =
+              section.chart_type === "bar"
+                ? breakdown.filter((bk) => section.kpis.includes(bk.kpi))
+                : [];
             if (sectionTimeSeries.length === 0 && sectionBreakdown.length === 0) return null;
             return (
               <section key={section.id} className="space-y-3">

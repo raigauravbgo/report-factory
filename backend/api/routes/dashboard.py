@@ -81,9 +81,22 @@ def validate_config(recipe_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{recipe_id}/filter-values")
-def get_dashboard_filter_values(recipe_id: int, db: Session = Depends(get_db)):
-    """Return distinct values for each filter column — used to populate FilterBar dropdowns."""
+def get_dashboard_filter_values(recipe_id: int, request: Request, db: Session = Depends(get_db)):
+    """Return distinct values for each filter column — used to populate FilterBar dropdowns.
+
+    Supports cascading (Power BI-style) filters: pass currently-active filter values as query
+    params (same format as the /data endpoint).  Each column's options are computed from the
+    dataset with ALL OTHER active filters applied, so selecting location=India narrows the
+    department dropdown to departments that exist within India.
+    """
     recipe, config, staging, all_table_names = _get_recipe_and_staging(recipe_id, db)
+
+    # Extract active filters from query params (same convention as /data endpoint).
+    reserved = {"recipe_id", "granularity"}
+    active_filters = {
+        k: v for k, v in request.query_params.items()
+        if k not in reserved and v
+    }
 
     # Only show columns explicitly listed as filters; fall back to dimensions if none set.
     filter_cols = config.get("filters") or []
@@ -126,7 +139,14 @@ def get_dashboard_filter_values(recipe_id: int, db: Session = Depends(get_db)):
         logger.debug("FILTER_BAR_CAP recipe_id=%d capped_dims=%s", recipe_id, candidate_cols)
 
     try:
-        options = get_filter_options(all_table_names, candidate_cols)
+        options = get_filter_options(
+            all_table_names,
+            candidate_cols,
+            confirmed_relationships=config.get("confirmed_relationships") or None,
+            upload_table_map=config.get("upload_table_map") or None,
+            active_filters=active_filters or None,
+            date_column=config.get("date_column") or None,
+        )
     except Exception as e:
         raise HTTPException(500, f"Failed to load filter values: {e}")
     return options

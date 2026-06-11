@@ -571,39 +571,79 @@ def _eval_formula(df: pd.DataFrame, formula: str) -> pd.Series:
     return pd.Series(dtype=float)
 
 
-def get_filter_options(staging_table_name: "str | list[str]", columns: list[str]) -> dict[str, list[str]]:
-    """Return distinct sorted values for each requested column (used to populate FilterBar dropdowns).
+def get_filter_options(
+    staging_table_name: "str | list[str]",
+    columns: list[str],
+    confirmed_relationships: "list[dict] | None" = None,
+    upload_table_map: "dict[str, str] | None" = None,
+    active_filters: "dict[str, str] | None" = None,
+    date_column: "str | None" = None,
+) -> dict[str, list[str]]:
+    """Return distinct sorted values for each filter column (used to populate FilterBar dropdowns).
 
-    Accepts a single table name or a list (multi-file datasets).  Integer values
-    that fall in the Excel serial-date range are converted to ISO date strings so
-    that columns like wb/we show human-readable dates instead of raw numbers.
+    Cascading filter logic (Power BI-style):
+      For each column, options are computed from the dataset filtered by ALL OTHER currently
+      active filters — but NOT the column's own filter.  This means selecting
+      location=India narrows the department dropdown to only departments that exist within
+      India, while the location dropdown still shows all available locations so the user
+      can change their selection.
+
+    Fact-only values:
+      If date_column is provided, rows missing that column are dropped after loading.
+      This mirrors compute_dashboard's dropna behaviour and excludes dimension/roster rows
+      that have no date (e.g. a Roster table's location=India where no fact rows match).
+
+    Enrichment:
+      The DataFrame is loaded with the same enrichment as compute_dashboard so filter
+      options only reflect values that actually exist in fact-table rows.
+
+    Integer values in the Excel serial-date range are converted to ISO date strings.
     """
-    df = _load_staging_df(staging_table_name)
+    df_base = _load_staging_df(
+        staging_table_name,
+        confirmed_relationships=confirmed_relationships,
+        upload_table_map=upload_table_map,
+        filter_cols=columns if columns else None,
+        date_column=date_column,
+    )
+
+    # Drop rows with no date value — these are pure dimension/roster rows that
+    # would otherwise inject dimension-only filter values (e.g. location=India
+    # from a Roster table when no fact rows carry that location).
+    if date_column and date_column in df_base.columns:
+        df_base = df_base.dropna(subset=[date_column])
+
+    def _raw_to_str_vals(raw_vals: list) -> list[str]:
+        numeric_raw: list[int | None] = []
+        for v in raw_vals:
+            try:
+                numeric_raw.append(int(float(str(v))))
+            except (ValueError, TypeError):
+                numeric_raw.append(None)
+        if all(n is not None and _EXCEL_DATE_MIN <= n <= _EXCEL_DATE_MAX for n in numeric_raw):
+            return [_excel_serial_to_date(v) for v in raw_vals]
+        str_vals: list[str] = []
+        for v in raw_vals:
+            try:
+                f = float(str(v))
+                str_vals.append(str(int(f)) if f == int(f) else str(v))
+            except (ValueError, TypeError):
+                str_vals.append(str(v))
+        return str_vals
+
     result: dict[str, list[str]] = {}
     for col in columns:
-        if col in df.columns:
-            raw_vals = df[col].dropna().unique().tolist()
-            # Detect and convert Excel serial date integers (e.g. wb, we columns)
-            numeric_raw: list[int | None] = []
-            for v in raw_vals:
-                try:
-                    numeric_raw.append(int(float(str(v))))
-                except (ValueError, TypeError):
-                    numeric_raw.append(None)
-
-            if all(n is not None and _EXCEL_DATE_MIN <= n <= _EXCEL_DATE_MAX for n in numeric_raw):
-                # All values are Excel serial dates — convert to ISO strings
-                str_vals = [_excel_serial_to_date(v) for v in raw_vals]
-            else:
-                # Default string conversion: render whole-number floats as integers
-                str_vals = []
-                for v in raw_vals:
-                    try:
-                        f = float(str(v))
-                        str_vals.append(str(int(f)) if f == int(f) else str(v))
-                    except (ValueError, TypeError):
-                        str_vals.append(str(v))
-            result[col] = sorted(str_vals)[:100]  # cap at 100 options per filter
+        if col not in df_base.columns:
+            continue
+        # Apply all active filters EXCEPT this column's own filter so the user can
+        # still see and change their current selection (Power BI cascade behaviour).
+        df_col = df_base
+        if active_filters:
+            for fc, fv in active_filters.items():
+                if fc != col and fv and fc in df_col.columns:
+                    df_col = _apply_filter_row(df_col, fc, fv)
+        raw_vals = df_col[col].dropna().unique().tolist()
+        result[col] = sorted(_raw_to_str_vals(raw_vals))[:100]
     return result
 
 
