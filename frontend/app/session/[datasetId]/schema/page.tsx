@@ -36,6 +36,9 @@ export default function SchemaPage() {
   const [sheetChanging, setSheetChanging] = useState(false); // M3: prevent concurrent sheet changes
   const [relationships, setRelationships] = useState<RelationshipSuggestion[]>([]);
   const [relLoading, setRelLoading] = useState(false);
+  const [vdBuilding, setVdBuilding] = useState(false);
+  const [vdResult, setVdResult] = useState<{ columns: string[]; row_count: number } | null>(null);
+  const [vdError, setVdError] = useState<string | null>(null);
 
   // Load all upload profiles from sessionStorage (set by upload page)
   useEffect(() => {
@@ -203,6 +206,19 @@ export default function SchemaPage() {
       );
     } catch { /* ignore */ }
     finally { setSheetChanging(false); }
+  }
+
+  async function handleBuildVirtualDimension() {
+    setVdBuilding(true);
+    setVdError(null);
+    try {
+      const res = await api.buildVirtualDimension(Number(datasetId));
+      setVdResult({ columns: res.columns, row_count: res.row_count });
+    } catch (e) {
+      setVdError(String(e));
+    } finally {
+      setVdBuilding(false);
+    }
   }
 
   if (loading) {
@@ -374,13 +390,50 @@ export default function SchemaPage() {
 
         {/* No-dimension notice — shown when all uploaded files are classified as fact/unknown */}
         {tabs.length > 0 && tabs.filter((t) => t.profile?.table_type === "dimension").length === 0 && (
-          <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-800">
-            <span className="font-semibold">No dimension table detected.</span>{" "}
-            Filters like <span className="font-medium">location</span> and{" "}
-            <span className="font-medium">department</span> will be sourced directly from your
-            fact tables — this works fine for those columns. If you have a separate employee or
-            roster file, mark it as <span className="font-medium">&quot;Dimension&quot;</span> using the
-            Table type dropdown above.
+          <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-800 space-y-2">
+            <div>
+              <span className="font-semibold">No dimension table detected.</span>{" "}
+              Filters like <span className="font-medium">location</span> and{" "}
+              <span className="font-medium">department</span> will be sourced directly from your
+              fact tables — this works fine for those columns. If you have a separate employee or
+              roster file, mark it as <span className="font-medium">&quot;Dimension&quot;</span> using the
+              Table type dropdown above.
+            </div>
+
+            {/* Virtual dimension builder */}
+            {!vdResult ? (
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  onClick={handleBuildVirtualDimension}
+                  disabled={vdBuilding}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-amber-700 text-white font-medium hover:bg-amber-800 disabled:opacity-50 transition-colors"
+                >
+                  {vdBuilding ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="animate-spin h-3 w-3 border border-white border-t-transparent rounded-full" />
+                      Building…
+                    </span>
+                  ) : (
+                    "Build Virtual Dimension"
+                  )}
+                </button>
+                <span className="text-amber-700">
+                  AI extracts shared agent attributes from your fact tables to enable dimension-based filters.
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 pt-1 text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
+                <span className="text-green-600">✓</span>
+                <span>
+                  <span className="font-semibold">Virtual dimension built</span> — {vdResult.row_count} agents,{" "}
+                  {vdResult.columns.length} columns:{" "}
+                  <span className="font-mono">{vdResult.columns.slice(0, 5).join(", ")}{vdResult.columns.length > 5 ? "…" : ""}</span>
+                </span>
+              </div>
+            )}
+            {vdError && (
+              <p className="text-red-600 mt-1">{vdError}</p>
+            )}
           </div>
         )}
 

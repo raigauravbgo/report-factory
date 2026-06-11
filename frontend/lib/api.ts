@@ -108,6 +108,15 @@ export const api = {
   getDimensions: (datasetId: number): Promise<DimensionColumn[]> =>
     request<DimensionColumn[]>(`/session/${datasetId}/dimensions`),
 
+  buildVirtualDimension: (datasetId: number): Promise<{
+    upload_id: number;
+    table_name: string;
+    row_count: number;
+    column_count: number;
+    columns: string[];
+  }> =>
+    request(`/session/${datasetId}/virtual-dimension`, { method: "POST" }),
+
   validateData: (datasetId: number, selectedKpiIds: string[]): Promise<ValidationResult> =>
     request<ValidationResult>(`/session/${datasetId}/validate`, {
       method: "POST",

@@ -203,6 +203,83 @@ def get_dimensions(dataset_id: int, db: Session = Depends(get_db)):
     return list(seen.values())
 
 
+# ── Virtual Dimension ─────────────────────────────────────────────────────────
+
+class VirtualDimensionResponse(BaseModel):
+    upload_id: int
+    table_name: str
+    row_count: int
+    column_count: int
+    columns: list[str]
+
+
+@router.post("/{dataset_id}/virtual-dimension", response_model=VirtualDimensionResponse)
+def create_virtual_dimension(dataset_id: int, db: Session = Depends(get_db)):
+    """
+    Build a virtual dimension from columns shared across 2+ fact tables.
+
+    Useful when no real dimension/Roster file was uploaded. The virtual
+    dimension is stored as a StagingTable with table_type='virtual_dimension'
+    and is then available for filter enrichment like any real dimension file.
+    """
+    from core.database import engine as app_engine
+    from services.virtual_dimension import store_virtual_dimension
+
+    # Load all staging tables for the dataset (excluding virtual dims already built)
+    staging_rows = (
+        db.query(StagingTable)
+        .join(Upload, StagingTable.upload_id == Upload.id)
+        .filter(Upload.dataset_id == dataset_id)
+        .filter(Upload.filename != "__virtual_dimension__")
+        .all()
+    )
+    if not staging_rows:
+        raise HTTPException(status_code=404, detail="No uploads found for this dataset")
+
+    # Fetch the dataset's client_id via the first upload
+    client_id = staging_rows[0].upload.dataset.client_id
+
+    # Load DataFrames from physical staging tables
+    import pandas as pd
+    from sqlalchemy import text
+
+    staging_dfs: list[tuple[str, pd.DataFrame]] = []
+    for st in staging_rows:
+        try:
+            with app_engine.connect() as conn:
+                df = pd.read_sql(text(f'SELECT * FROM "{st.table_name}"'), con=conn)
+            staging_dfs.append((st.table_name, df))
+        except Exception as exc:
+            logger.warning("virtual_dimension: could not load %s: %s", st.table_name, exc)
+
+    if not staging_dfs:
+        raise HTTPException(status_code=422, detail="No staging data could be loaded")
+
+    result_st = store_virtual_dimension(
+        dataset_id=dataset_id,
+        staging_dfs=staging_dfs,
+        db=db,
+        engine=app_engine,
+        client_id=client_id,
+    )
+
+    if result_st is None:
+        raise HTTPException(
+            status_code=422,
+            detail="No common dimension columns found across fact tables. "
+                   "Cannot build a virtual dimension.",
+        )
+
+    vd_cols = [c["name"] for c in (result_st.profile_data.get("columns") or [])]
+    return VirtualDimensionResponse(
+        upload_id=result_st.upload_id,
+        table_name=result_st.table_name,
+        row_count=result_st.row_count,
+        column_count=result_st.column_count,
+        columns=vd_cols,
+    )
+
+
 # ── Validation ────────────────────────────────────────────────────────────────
 
 class ValidateRequest(BaseModel):
