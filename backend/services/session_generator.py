@@ -110,6 +110,13 @@ def generate_from_session(
             dataset_id, len(filters), filters,
         )
 
+    if len(uploads) > 1 and not confirmed_relationships:
+        logger.warning(
+            "dataset %d: %d files but confirmed_relationships is empty — falling back to pd.concat",
+            dataset_id,
+            len(uploads),
+        )
+
     # ── Build story sections ───────────────────────────────────────────────
     sections = _build_sections(resolved_kpis, {**interview_result, "domain": domain or "ops"})
 
