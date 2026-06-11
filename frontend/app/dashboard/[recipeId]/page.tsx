@@ -392,120 +392,266 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Trend charts */}
-        {time_series.length > 0 && (
-          <section className="space-y-3">
-            <SectionHeader title="Trends Over Time" subtitle={`${config.granularity} granularity`} />
-            <div className="grid gap-5 lg:grid-cols-2">
-              {time_series.map((ts, i) => {
-                const kpi = kpi_summaries.find((k) => k.name === ts.kpi);
-                const formula = kpi?.formula ?? "";
-                const fmt = kpi?.format;
-                const takeaway = ts.data.length > 1
-                  ? (() => {
-                      const first = ts.data[0]?.value ?? 0;
-                      const last = ts.data[ts.data.length - 1]?.value ?? 0;
-                      const diff = last - first;
-                      const dir = diff > 0 ? "increased" : diff < 0 ? "decreased" : "remained stable";
-                      return `${ts.kpi.replace(/_/g, " ")} ${dir} from ${formatKpiValue(first, formula, fmt)} to ${formatKpiValue(last, formula, fmt)} over the period.`;
-                    })()
-                  : undefined;
-
-                return (
-                  <ChartCard
-                    key={ts.kpi}
-                    title={ts.kpi.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                    subtitle={`${config.granularity} · ${ts.data.length} periods`}
-                    takeaway={takeaway}
-                  >
-                    {ts.data.length === 0 ? (
-                      <p className="text-sm text-gray-400 py-8 text-center">No time series data. Try switching to Daily or Weekly granularity.</p>
-                    ) : ts.data.length === 1 ? (
-                      <p className="text-sm text-gray-400 py-8 text-center">
-                        Only 1 period of data — switch to <strong>Daily</strong> or <strong>Weekly</strong> for a trend view.
-                      </p>
-                    ) : (
-                      // M4: Error boundary prevents a single bad chart from crashing the page
-                      <ChartErrorBoundary>
-                        <TrendChart
-                          ts={ts}
-                          formula={formula}
-                          fmt={fmt}
-                          color={COLORS[i % COLORS.length]}
-                          zoom={getZoom(ts.kpi, ts.data.length)}
-                          onZoomIn={() => zoomIn(ts.kpi, ts.data.length)}
-                          onZoomOut={() => zoomOut(ts.kpi, ts.data.length)}
-                          onResetZoom={() => resetZoom(ts.kpi)}
-                          onBrushChange={(start, end) =>
-                            setZoomState((z) => ({ ...z, [ts.kpi]: { start, end } }))
-                          }
-                        />
-                      </ChartErrorBoundary>
-                    )}
-                  </ChartCard>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* Breakdown charts */}
-        {breakdown.length > 0 && (
-          <section className="space-y-3">
-            <SectionHeader
-              title={
-                breakdown.every((b) => b.dimension === breakdown[0]?.dimension)
-                  ? `Breakdown by ${breakdown[0]?.dimension?.replace(/_/g, " ")}`
-                  : "Breakdown Analysis"
-              }
-              subtitle="Comparison across dimension values"
-            />
-            <div className="grid gap-5 lg:grid-cols-2">
-              {breakdown.map((bk, i) => {
-                const kpi = kpi_summaries.find((k) => k.name === bk.kpi);
-                const formula = kpi?.formula ?? "";
-                const top = bk.data[0];
-                const takeaway = top
-                  ? `Top performer: ${top.label} at ${formatKpiValue(top.value, formula)}.`
-                  : undefined;
-
-                return (
-                  <ChartCard
-                    key={bk.kpi}
-                    title={`${bk.kpi.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} by ${bk.dimension}`}
-                    subtitle={`${bk.data.length} groups`}
-                    takeaway={takeaway}
-                  >
-                    {bk.data.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={200}>
-                        <BarChart data={bk.data.map((d) => ({ ...d, value: Number.isFinite(d.value) ? d.value : 0 }))} margin={{ top: 4, right: 8, left: 0, bottom: 36 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                          <XAxis
-                            dataKey="label"
-                            tick={{ fontSize: 10 }}
-                            tickLine={false}
-                            angle={-30}
-                            textAnchor="end"
-                            interval={0}
-                          />
-                          <YAxis
-                            tick={{ fontSize: 10 }}
-                            tickLine={false}
-                            axisLine={false}
-                            tickFormatter={(v) => formatAxisValue(v, formula)}
-                          />
-                          <Tooltip formatter={(v: unknown) => formatKpiValue(v as number, formula)} />
-                          <Bar dataKey="value" fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} maxBarSize={40} isAnimationActive={false} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <p className="text-sm text-gray-400 py-8 text-center">No breakdown data available.</p>
-                    )}
-                  </ChartCard>
-                );
-              })}
-            </div>
-          </section>
+        {/* Story sections (new multi-file recipes) or flat layout (legacy backward-compat) */}
+        {config.sections && config.sections.length > 0 ? (
+          config.sections.map((section) => {
+            const sectionTimeSeries = time_series.filter((ts) =>
+              section.kpis.includes(ts.kpi),
+            );
+            const sectionBreakdown = breakdown.filter((bk) =>
+              section.kpis.includes(bk.kpi),
+            );
+            if (sectionTimeSeries.length === 0 && sectionBreakdown.length === 0) return null;
+            return (
+              <section key={section.id} className="space-y-3">
+                <SectionHeader
+                  title={section.title}
+                  subtitle={`${section.kpis.length} metric${section.kpis.length !== 1 ? "s" : ""}`}
+                />
+                <div className="grid gap-5 lg:grid-cols-2">
+                  {sectionTimeSeries.map((ts, i) => {
+                    const kpi = kpi_summaries.find((k) => k.name === ts.kpi);
+                    const formula = kpi?.formula ?? "";
+                    const fmt = kpi?.format;
+                    const takeaway =
+                      ts.data.length > 1
+                        ? (() => {
+                            const first = ts.data[0]?.value ?? 0;
+                            const last = ts.data[ts.data.length - 1]?.value ?? 0;
+                            const diff = last - first;
+                            const dir =
+                              diff > 0 ? "increased" : diff < 0 ? "decreased" : "remained stable";
+                            return `${ts.kpi.replace(/_/g, " ")} ${dir} from ${formatKpiValue(first, formula, fmt)} to ${formatKpiValue(last, formula, fmt)} over the period.`;
+                          })()
+                        : undefined;
+                    return (
+                      <ChartCard
+                        key={ts.kpi}
+                        title={ts.kpi.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                        subtitle={`${config.granularity} · ${ts.data.length} periods`}
+                        takeaway={takeaway}
+                      >
+                        {ts.data.length === 0 ? (
+                          <p className="text-sm text-gray-400 py-8 text-center">
+                            No time series data. Try switching to Daily or Weekly granularity.
+                          </p>
+                        ) : ts.data.length === 1 ? (
+                          <p className="text-sm text-gray-400 py-8 text-center">
+                            Only 1 period of data — switch to <strong>Daily</strong> or{" "}
+                            <strong>Weekly</strong> for a trend view.
+                          </p>
+                        ) : (
+                          <ChartErrorBoundary>
+                            <TrendChart
+                              ts={ts}
+                              formula={formula}
+                              fmt={fmt}
+                              color={COLORS[i % COLORS.length]}
+                              zoom={getZoom(ts.kpi, ts.data.length)}
+                              onZoomIn={() => zoomIn(ts.kpi, ts.data.length)}
+                              onZoomOut={() => zoomOut(ts.kpi, ts.data.length)}
+                              onResetZoom={() => resetZoom(ts.kpi)}
+                              onBrushChange={(start, end) =>
+                                setZoomState((z) => ({ ...z, [ts.kpi]: { start, end } }))
+                              }
+                            />
+                          </ChartErrorBoundary>
+                        )}
+                      </ChartCard>
+                    );
+                  })}
+                  {sectionBreakdown.map((bk, i) => {
+                    const kpi = kpi_summaries.find((k) => k.name === bk.kpi);
+                    const formula = kpi?.formula ?? "";
+                    const top = bk.data[0];
+                    const takeaway = top
+                      ? `Top performer: ${top.label} at ${formatKpiValue(top.value, formula)}.`
+                      : undefined;
+                    return (
+                      <ChartCard
+                        key={`${bk.kpi}-${bk.dimension}`}
+                        title={`${bk.kpi.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} by ${bk.dimension}`}
+                        subtitle={`${bk.data.length} groups`}
+                        takeaway={takeaway}
+                      >
+                        {bk.data.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={200}>
+                            <BarChart
+                              data={bk.data.map((d) => ({
+                                ...d,
+                                value: Number.isFinite(d.value) ? d.value : 0,
+                              }))}
+                              margin={{ top: 4, right: 8, left: 0, bottom: 36 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                              <XAxis
+                                dataKey="label"
+                                tick={{ fontSize: 10 }}
+                                tickLine={false}
+                                angle={-30}
+                                textAnchor="end"
+                                interval={0}
+                              />
+                              <YAxis
+                                tick={{ fontSize: 10 }}
+                                tickLine={false}
+                                axisLine={false}
+                                tickFormatter={(v) => formatAxisValue(v, formula)}
+                              />
+                              <Tooltip formatter={(v: unknown) => formatKpiValue(v as number, formula)} />
+                              <Bar
+                                dataKey="value"
+                                fill={COLORS[i % COLORS.length]}
+                                radius={[4, 4, 0, 0]}
+                                maxBarSize={40}
+                                isAnimationActive={false}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <p className="text-sm text-gray-400 py-8 text-center">
+                            No breakdown data available.
+                          </p>
+                        )}
+                      </ChartCard>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })
+        ) : (
+          <>
+            {/* Flat layout — backward compat for single-file / legacy recipes without sections */}
+            {time_series.length > 0 && (
+              <section className="space-y-3">
+                <SectionHeader title="Trends Over Time" subtitle={`${config.granularity} granularity`} />
+                <div className="grid gap-5 lg:grid-cols-2">
+                  {time_series.map((ts, i) => {
+                    const kpi = kpi_summaries.find((k) => k.name === ts.kpi);
+                    const formula = kpi?.formula ?? "";
+                    const fmt = kpi?.format;
+                    const takeaway =
+                      ts.data.length > 1
+                        ? (() => {
+                            const first = ts.data[0]?.value ?? 0;
+                            const last = ts.data[ts.data.length - 1]?.value ?? 0;
+                            const diff = last - first;
+                            const dir =
+                              diff > 0 ? "increased" : diff < 0 ? "decreased" : "remained stable";
+                            return `${ts.kpi.replace(/_/g, " ")} ${dir} from ${formatKpiValue(first, formula, fmt)} to ${formatKpiValue(last, formula, fmt)} over the period.`;
+                          })()
+                        : undefined;
+                    return (
+                      <ChartCard
+                        key={ts.kpi}
+                        title={ts.kpi.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                        subtitle={`${config.granularity} · ${ts.data.length} periods`}
+                        takeaway={takeaway}
+                      >
+                        {ts.data.length === 0 ? (
+                          <p className="text-sm text-gray-400 py-8 text-center">
+                            No time series data. Try switching to Daily or Weekly granularity.
+                          </p>
+                        ) : ts.data.length === 1 ? (
+                          <p className="text-sm text-gray-400 py-8 text-center">
+                            Only 1 period of data — switch to <strong>Daily</strong> or{" "}
+                            <strong>Weekly</strong> for a trend view.
+                          </p>
+                        ) : (
+                          <ChartErrorBoundary>
+                            <TrendChart
+                              ts={ts}
+                              formula={formula}
+                              fmt={fmt}
+                              color={COLORS[i % COLORS.length]}
+                              zoom={getZoom(ts.kpi, ts.data.length)}
+                              onZoomIn={() => zoomIn(ts.kpi, ts.data.length)}
+                              onZoomOut={() => zoomOut(ts.kpi, ts.data.length)}
+                              onResetZoom={() => resetZoom(ts.kpi)}
+                              onBrushChange={(start, end) =>
+                                setZoomState((z) => ({ ...z, [ts.kpi]: { start, end } }))
+                              }
+                            />
+                          </ChartErrorBoundary>
+                        )}
+                      </ChartCard>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+            {breakdown.length > 0 && (
+              <section className="space-y-3">
+                <SectionHeader
+                  title={
+                    breakdown.every((b) => b.dimension === breakdown[0]?.dimension)
+                      ? `Breakdown by ${breakdown[0]?.dimension?.replace(/_/g, " ")}`
+                      : "Breakdown Analysis"
+                  }
+                  subtitle="Comparison across dimension values"
+                />
+                <div className="grid gap-5 lg:grid-cols-2">
+                  {breakdown.map((bk, i) => {
+                    const kpi = kpi_summaries.find((k) => k.name === bk.kpi);
+                    const formula = kpi?.formula ?? "";
+                    const top = bk.data[0];
+                    const takeaway = top
+                      ? `Top performer: ${top.label} at ${formatKpiValue(top.value, formula)}.`
+                      : undefined;
+                    return (
+                      <ChartCard
+                        key={bk.kpi}
+                        title={`${bk.kpi.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} by ${bk.dimension}`}
+                        subtitle={`${bk.data.length} groups`}
+                        takeaway={takeaway}
+                      >
+                        {bk.data.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={200}>
+                            <BarChart
+                              data={bk.data.map((d) => ({
+                                ...d,
+                                value: Number.isFinite(d.value) ? d.value : 0,
+                              }))}
+                              margin={{ top: 4, right: 8, left: 0, bottom: 36 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                              <XAxis
+                                dataKey="label"
+                                tick={{ fontSize: 10 }}
+                                tickLine={false}
+                                angle={-30}
+                                textAnchor="end"
+                                interval={0}
+                              />
+                              <YAxis
+                                tick={{ fontSize: 10 }}
+                                tickLine={false}
+                                axisLine={false}
+                                tickFormatter={(v) => formatAxisValue(v, formula)}
+                              />
+                              <Tooltip formatter={(v: unknown) => formatKpiValue(v as number, formula)} />
+                              <Bar
+                                dataKey="value"
+                                fill={COLORS[i % COLORS.length]}
+                                radius={[4, 4, 0, 0]}
+                                maxBarSize={40}
+                                isAnimationActive={false}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <p className="text-sm text-gray-400 py-8 text-center">
+                            No breakdown data available.
+                          </p>
+                        )}
+                      </ChartCard>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </>
         )}
 
         {/* Config summary */}
