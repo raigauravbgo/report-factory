@@ -86,15 +86,19 @@ def _load_staging_df(
     if len(dfs) == 1:
         return dfs[0]
 
+    # Always enrich per-table FIRST so every table gets the filter/breakdown
+    # columns before any join or concat.  This is required even when
+    # confirmed_relationships is present: same_dimension relationships fall back
+    # to plain concat inside _apply_relationships, so without pre-enrichment
+    # tables like QA (which lack location/department) would still have NaN values
+    # and produce empty breakdown charts.
+    if filter_cols and len(dfs) >= 2:
+        dfs = _enrich_dfs(dfs, names, filter_cols)
+
     # Apply PK/FK-aware joins when the caller supplies relationship context.
     if confirmed_relationships and upload_table_map:
         return _apply_relationships(dfs, names, confirmed_relationships, upload_table_map)
 
-    # Default: raw concat — columns absent in one file become NaN for its rows.
-    # When filter_cols are provided and there are 2+ tables, enrich tables that
-    # are missing filter columns so they survive the downstream filter.
-    if filter_cols and len(dfs) >= 2:
-        return _apply_same_dimension_enrichment(dfs, names, filter_cols)
     return pd.concat(dfs, ignore_index=True, sort=False)
 
 
@@ -150,17 +154,18 @@ def _find_cross_name_join_key(
     return None
 
 
-def _apply_same_dimension_enrichment(
+def _enrich_dfs(
     dfs: "list[pd.DataFrame]",
     table_names: "list[str]",
     filter_cols: "list[str]",
-) -> pd.DataFrame:
-    """Left-join filter columns from sibling tables into tables that lack them.
+) -> "list[pd.DataFrame]":
+    """Per-table enrichment — returns the enriched list without concatenating.
 
-    When a filter is active (e.g. location=Gurgaon) and some fact tables do not
-    contain the filter column, those tables would lose ALL rows after filtering.
-    This function detects those tables and enriches them from a sibling table
-    that (a) has the filter column and (b) shares a join key.
+    Used by both _apply_same_dimension_enrichment (plain concat path) and
+    _load_staging_df (which may further apply pk_fk relationships on the list).
+
+    Left-joins filter columns from sibling tables into tables that lack them
+    so that every table has the columns needed for filtering and breakdown charts.
 
     Join key detection is fully data-driven — no column names are hardcoded:
 
@@ -172,28 +177,18 @@ def _apply_same_dimension_enrichment(
     Step 2 — cross-name: value-overlap probe via _find_cross_name_join_key.
         Used when no same-name joinable column exists — e.g. Roster.email and
         CSAT.agent_email are the same data under different names.
-
-    This design works for any dataset (BPO, hospital, retail, HR, etc.) without
-    any knowledge of column naming conventions.
-
-    Parameters
-    ----------
-    dfs         : list of DataFrames, one per staging table (same order as table_names)
-    table_names : corresponding staging table names (used only for logging)
-    filter_cols : column names that must be present for filtering to work
     """
 
     def _joinable(series: "pd.Series") -> bool:
-        """True for columns that can be join keys: non-float (strings + integer IDs)."""
-        return not pd.api.types.is_float_dtype(series)
+        """True for columns usable as join keys: non-float, non-datetime strings/integer IDs.
+        Date columns are excluded — they have high cardinality but wrong semantics for lookup joins.
+        """
+        return (
+            not pd.api.types.is_float_dtype(series)
+            and not pd.api.types.is_datetime64_any_dtype(series)
+        )
 
     def _donor_join_strength(candidate_j: int, left_df: "pd.DataFrame") -> int:
-        """Negative cardinality of the best shared joinable column.
-
-        Ranks competing donors: the one sharing the highest-cardinality joinable
-        column is most likely to produce a correct many-to-one lookup.
-        Lower return value = better donor (used with min() for ranking).
-        """
         donor_df = dfs[candidate_j]
         shared = [
             k for k in left_df.columns
@@ -208,13 +203,8 @@ def _apply_same_dimension_enrichment(
     for i, df in enumerate(dfs):
         missing = [c for c in filter_cols if c not in df.columns]
         if not missing:
-            continue  # this table already has all filter columns — nothing to do
+            continue
 
-        # Prefer a single donor that covers ALL missing columns for consistency —
-        # both location and department from the same table via the same join key
-        # produces a coherent result; mixing donors can create mismatched mappings.
-        # Rank by: (1) strength of shared join key; (2) total filter-col cardinality
-        # as tiebreaker to prefer the broadest data source.
         all_covering = [
             j for j, other in enumerate(dfs)
             if j != i and all(c in other.columns for c in missing)
@@ -229,7 +219,6 @@ def _apply_same_dimension_enrichment(
             )
             donor_to_cols: dict[int, list[str]] = {best_j: list(missing)}
         else:
-            # No single donor covers all columns — fall back to per-column best donor.
             col_to_donor: dict[str, int] = {}
             for col in missing:
                 best_card = -1
@@ -255,7 +244,6 @@ def _apply_same_dimension_enrichment(
         for donor_j, cols_to_add in donor_to_cols.items():
             donor = dfs[donor_j]
 
-            # Step 1: same-name join key — shared joinable column with highest cardinality.
             shared = [
                 k for k in enriched[i].columns
                 if k in donor.columns
@@ -266,8 +254,6 @@ def _apply_same_dimension_enrichment(
                 max(shared, key=lambda k: int(enriched[i][k].nunique())) if shared else None
             )
 
-            # Step 2: cross-name join key — value-overlap probe for the case where
-            # the same identifier column has different names in the two tables.
             cross_rename: "str | None" = None
             if join_key is None:
                 cross = _find_cross_name_join_key(enriched[i], donor)
@@ -283,7 +269,6 @@ def _apply_same_dimension_enrichment(
                 )
                 continue
 
-            # Build a deduplicated lookup; coerce join key dtype if needed.
             lookup_cols_donor = ([cross_rename] if cross_rename else [join_key]) + cols_to_add
             lookup = donor[[c for c in lookup_cols_donor if c in donor.columns]].drop_duplicates(
                 subset=[cross_rename if cross_rename else join_key]
@@ -300,7 +285,16 @@ def _apply_same_dimension_enrichment(
                 table_names[i], cols_to_add, join_key, donor_j,
             )
 
-    return pd.concat(enriched, ignore_index=True, sort=False)
+    return enriched
+
+
+def _apply_same_dimension_enrichment(
+    dfs: "list[pd.DataFrame]",
+    table_names: "list[str]",
+    filter_cols: "list[str]",
+) -> pd.DataFrame:
+    """Enrich tables and return a single concatenated DataFrame."""
+    return pd.concat(_enrich_dfs(dfs, table_names, filter_cols), ignore_index=True, sort=False)
 
 
 def _apply_relationships(
@@ -852,11 +846,19 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
     _confirmed_rels = recipe_config.get("confirmed_relationships") or []
     _upload_table_map = recipe_config.get("upload_table_map") or {}
 
+    # Enrich for BOTH active filter columns AND configured dimensions.
+    # Dimension columns (e.g. location, department) may be absent from some fact
+    # tables (e.g. QA file has no location col). Without enrichment those rows
+    # produce NaN in dimension columns, breaking breakdown charts and filters.
+    _dimensions = recipe_config.get("dimensions") or []
+    _active_filter_cols = list(filters.keys()) if filters else []
+    _enrich_cols = list(dict.fromkeys(_active_filter_cols + _dimensions)) or None
+
     df = _load_staging_df(
         staging_table_name,
         confirmed_relationships=_confirmed_rels or None,
         upload_table_map=_upload_table_map or None,
-        filter_cols=list(filters.keys()) if filters else None,
+        filter_cols=_enrich_cols,
         date_column=recipe_config.get("date_column"),
     )
     if df.empty:
