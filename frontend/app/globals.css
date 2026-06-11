@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Backgrounds */
+  --canvas:  #F0F2F8;
+  --card:    #FFFFFF;
+  --raised:  #F8F9FD;
+  --wash:    #EDF0F8;
+
+  /* Borders */
+  --rim:     #E0E6F2;
+  --edge:    #C8D2E8;
+
+  /* Text */
+  --ink:     #1B2340;
+  --dim:     #4A5670;
+  --mist:    #8B97B0;
+
+  /* Accents — BGO brand palette */
+  --signal:  #00B5AD;
+  --azure:   #3B7CF8;
+  --caution: #F59E0B;
+  --grow:    #16A34A;
+  --danger:  #DC2626;
+  --royal:   #7C3AED;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-canvas:  var(--canvas);
+  --color-card:    var(--card);
+  --color-raised:  var(--raised);
+  --color-wash:    var(--wash);
+  --color-rim:     var(--rim);
+  --color-edge:    var(--edge);
+  --color-ink:     var(--ink);
+  --color-dim:     var(--dim);
+  --color-mist:    var(--mist);
+  --color-signal:  var(--signal);
+  --color-azure:   var(--azure);
+  --color-caution: var(--caution);
+  --color-grow:    var(--grow);
+  --color-danger:  var(--danger);
+  --color-royal:   var(--royal);
+  --font-sans: var(--font-jakarta);
+  --font-mono: var(--font-jetbrains);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--mist); }
+
+/* Selection */
+::selection { background: rgba(0, 181, 173, 0.2); color: var(--ink); }
+
+/* Smooth transitions */
+button, a, input, select {
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }

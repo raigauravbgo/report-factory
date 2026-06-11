@@ -9,29 +9,44 @@ interface Props {
 }
 
 export default function FilterBar({ dimensions, filters, activeFilters, filterOptions, onFilterChange }: Props) {
-  // Show only the explicitly configured filter columns.
-  // Dimensions are used for grouping/breakdown, not row-level filtering.
-  // Fall back to dimensions only when no filters are configured.
   const all = filters.length > 0 ? [...new Set(filters)] : [...new Set(dimensions)];
   if (all.length === 0) return null;
 
   const hasActiveFilter = Object.values(activeFilters).some(Boolean);
+  const activeCount = Object.values(activeFilters).filter(Boolean).length;
 
   return (
-    <div className="flex items-center gap-4 flex-wrap bg-white border-b border-gray-200 px-6 py-3">
-      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Filter</span>
+    <div className="flex items-center gap-4 flex-wrap bg-card border-b border-rim px-6 py-3">
+      <div className="flex items-center gap-1.5">
+        <svg viewBox="0 0 14 14" fill="none" className="w-3 h-3 text-mist">
+          <path d="M1 3h12M3 7h8M5 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+        <span className="text-[10px] font-bold text-mist uppercase tracking-[0.1em]">
+          Filter
+          {activeCount > 0 && (
+            <span className="ml-1.5 bg-signal text-canvas rounded-full px-1.5 py-0.5 text-[8px] font-bold">
+              {activeCount}
+            </span>
+          )}
+        </span>
+      </div>
       {all.map((dim) => {
         const options = filterOptions[dim] ?? [];
         const active = !!activeFilters[dim];
         return (
-          <div key={dim} className="flex flex-col gap-0.5">
-            <label className="text-[10px] uppercase tracking-wide text-gray-400">{dim.replace(/_/g, " ")}</label>
+          <div key={dim} className="flex flex-col gap-1">
+            <label className="text-[9px] uppercase tracking-[0.1em] text-mist font-semibold">
+              {dim.replace(/_/g, " ")}
+            </label>
             <select
               value={activeFilters[dim] ?? ""}
               onChange={(e) => onFilterChange(dim, e.target.value)}
-              className={`rounded-lg border text-xs px-2 py-1.5 text-gray-700 min-w-[130px] focus:outline-none focus:ring-1 focus:ring-[#00B5AD] transition-colors ${
-                active ? "border-[#00B5AD] bg-teal-50" : "border-gray-300"
-              }`}
+              className={`rounded-lg border text-[11px] px-2.5 py-1.5 min-w-[120px] font-medium
+                focus:outline-none focus:ring-1 focus:ring-signal transition-colors bg-raised
+                ${active
+                  ? "border-signal text-signal"
+                  : "border-rim text-dim hover:border-edge"
+                }`}
             >
               <option value="">All</option>
               {options.map((opt) => (
@@ -44,7 +59,7 @@ export default function FilterBar({ dimensions, filters, activeFilters, filterOp
       {hasActiveFilter && (
         <button
           onClick={() => all.forEach((dim) => onFilterChange(dim, ""))}
-          className="text-xs text-[#00B5AD] underline self-end pb-1"
+          className="text-[11px] text-danger/70 hover:text-danger font-medium self-end pb-1 transition-colors"
         >
           Clear all
         </button>

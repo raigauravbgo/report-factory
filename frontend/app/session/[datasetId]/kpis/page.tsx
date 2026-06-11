@@ -6,17 +6,17 @@ import { api } from "@/lib/api";
 import { logEvent } from "@/lib/logger";
 import type { KpiSuggestion } from "@/lib/types";
 
-const DOMAIN_COLORS: Record<string, string> = {
-  collections: "bg-amber-50 text-amber-700 border-amber-100",
-  cx: "bg-blue-50 text-blue-700 border-blue-100",
-  sales: "bg-green-50 text-green-700 border-green-100",
-  workforce: "bg-purple-50 text-purple-700 border-purple-100",
-  ops: "bg-gray-50 text-gray-600 border-gray-100",
-  custom: "bg-pink-50 text-pink-700 border-pink-100",
+const DOMAIN_STYLES: Record<string, string> = {
+  collections: "bg-caution/10 text-caution border-caution/20",
+  cx:          "bg-azure/10 text-azure border-azure/20",
+  sales:       "bg-grow/10 text-grow border-grow/20",
+  workforce:   "bg-royal/10 text-royal border-royal/20",
+  ops:         "bg-wash text-dim border-rim",
+  custom:      "bg-signal/10 text-signal border-signal/20",
 };
 
-const CONF_COLOR = (c: number) =>
-  c >= 0.85 ? "text-green-600" : c >= 0.65 ? "text-amber-600" : "text-gray-400";
+const CONF_STYLE = (c: number) =>
+  c >= 0.85 ? "text-grow" : c >= 0.65 ? "text-caution" : "text-mist";
 
 export default function KpisPage() {
   const { datasetId } = useParams<{ datasetId: string }>();
@@ -33,29 +33,26 @@ export default function KpisPage() {
   const [customFormula, setCustomFormula] = useState("");
   const [kpiError, setKpiError] = useState<string | null>(null);
   const [addingCustom, setAddingCustom] = useState(false);
-  // C5: Use retryCount to re-trigger the fetch without reloading the page
   const [retryCount, setRetryCount] = useState(0);
 
   const dragItem = useRef<number | null>(null);
   const dragOver = useRef<number | null>(null);
 
   useEffect(() => {
-    // C4: Guard all JSON.parse calls against corrupted sessionStorage
     let uploadIds: number[] = [];
     try {
       const stored = sessionStorage.getItem(`dataset_${datasetId}_uploads`);
       if (stored) uploadIds = (JSON.parse(stored) as { uploadId: number }[]).map((u) => u.uploadId);
-    } catch { /* ignore corrupted storage */ }
+    } catch { /* ignore */ }
 
     let interviewAnswers = {};
     try {
       const raw = sessionStorage.getItem(`dataset_${datasetId}_interview`);
       if (raw) interviewAnswers = JSON.parse(raw);
-    } catch { /* ignore corrupted storage */ }
+    } catch { /* ignore */ }
 
     api.getKpiSuggestions(Number(datasetId), uploadIds, interviewAnswers).then((res) => {
       setSuggestions(res);
-      // Pre-select high-confidence items
       setSelected(res.filter((k) => k.confidence >= 0.75).slice(0, 8));
       setLoading(false);
     }).catch((e) => {
@@ -67,8 +64,7 @@ export default function KpisPage() {
   const domains = ["all", ...Array.from(new Set(suggestions.map((s) => s.domain || "other")))];
 
   const available = suggestions.filter((s) => {
-    const inSelected = selected.some((sel) => sel.kpi_id === s.kpi_id);
-    if (inSelected) return false;
+    if (selected.some((sel) => sel.kpi_id === s.kpi_id)) return false;
     if (domainFilter !== "all" && s.domain !== domainFilter) return false;
     if (search && !s.display_name.toLowerCase().includes(search.toLowerCase())
       && !s.formula.toLowerCase().includes(search.toLowerCase())) return false;
@@ -113,15 +109,10 @@ export default function KpisPage() {
 
   const onDragStart = (i: number) => { dragItem.current = i; };
   const onDragEnter = (i: number) => { dragOver.current = i; };
-  // H14: Reset refs when drag is cancelled (dragged outside list and released)
-  const onDragEnd = () => {
-    dragItem.current = null;
-    dragOver.current = null;
-  };
+  const onDragEnd = () => { dragItem.current = null; dragOver.current = null; };
   const onDrop = () => {
     if (dragItem.current === null || dragOver.current === null) return;
     const from = dragItem.current;
-    // L9: Clamp index to valid range before splice
     const to = Math.max(0, Math.min(dragOver.current, selected.length - 1));
     const reordered = [...selected];
     const [moved] = reordered.splice(from, 1);
@@ -144,25 +135,25 @@ export default function KpisPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div className="bg-white border-b border-gray-200 px-6 py-5">
-        <h1 className="text-lg font-bold text-[#1B2340]">KPI Selection</h1>
-        <p className="text-xs text-gray-400 mt-0.5">
-          Check the KPIs you want in your dashboard. Drag to reorder the selected list.
-        </p>
+      {/* Header */}
+      <div className="bg-card border-b border-rim px-6 py-4">
+        <h1 className="text-[15px] font-bold text-ink tracking-tight">KPI Selection</h1>
+        <p className="text-[11px] text-mist mt-0.5">Check KPIs for your dashboard. Drag to reorder the selected list.</p>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-64 text-sm text-gray-400">
-          <span className="animate-spin h-5 w-5 border-2 border-teal-500 border-t-transparent rounded-full mr-3" />
+        <div className="flex items-center justify-center h-64 gap-3 text-dim text-[12px]">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-signal border-t-transparent" />
           Finding matching KPIs…
         </div>
       ) : (
-        <div className="flex-1 flex gap-0 overflow-hidden">
+        <div className="flex-1 flex overflow-hidden">
 
-          {/* Left panel — available KPIs */}
-          <div className="flex-1 flex flex-col border-r border-gray-100 overflow-hidden">
-            {/* Filters */}
-            <div className="px-5 py-3 border-b border-gray-100 space-y-2">
+          {/* Left — available KPIs */}
+          <div className="flex-1 flex flex-col border-r border-rim overflow-hidden">
+
+            {/* Filters bar */}
+            <div className="px-5 py-3 border-b border-rim space-y-2.5 bg-raised/50">
               <div className="flex flex-wrap gap-1.5">
                 {domains.map((d) => (
                   <button
@@ -171,63 +162,64 @@ export default function KpisPage() {
                       setDomainFilter(d);
                       if (d !== "all") logEvent("domain_filter_applied", "kpis", { domain: d }, { datasetId: Number(datasetId) });
                     }}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border capitalize transition-colors
-                      ${domainFilter === d ? "bg-[#1B2340] text-white border-[#1B2340]" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}
+                    className={`px-3 py-1 rounded-full text-[10px] font-semibold border capitalize transition-all
+                      ${domainFilter === d
+                        ? "bg-[#1B2340] text-white border-[#1B2340]"
+                        : "bg-raised text-dim border-rim hover:border-edge hover:text-ink"}`}
                   >
                     {d}
                   </button>
                 ))}
               </div>
               <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Search KPIs…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#1B2340]"
-                />
-                <button onClick={selectAll} className="text-xs text-blue-500 hover:underline whitespace-nowrap">Select all</button>
-                <button onClick={deselectAll} className="text-xs text-gray-400 hover:underline whitespace-nowrap">Deselect all</button>
+                <div className="flex-1 relative">
+                  <svg viewBox="0 0 16 16" fill="none" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-mist pointer-events-none">
+                    <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M10.5 10.5L13 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search KPIs…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full text-[11px] border border-rim bg-raised rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:border-signal text-ink placeholder:text-mist"
+                  />
+                </div>
+                <button onClick={selectAll} className="text-[10px] text-azure hover:underline whitespace-nowrap font-medium">Select all</button>
+                <button onClick={deselectAll} className="text-[10px] text-mist hover:text-dim whitespace-nowrap">Deselect all</button>
               </div>
             </div>
 
             {/* KPI list */}
             <div className="flex-1 overflow-y-auto">
               {kpiError && (
-                <div className="m-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 flex items-start justify-between gap-3">
-                  <p className="text-xs text-red-700">{kpiError}</p>
+                <div className="m-4 rounded-lg bg-danger/5 border border-danger/25 px-4 py-3 flex items-start justify-between gap-3">
+                  <p className="text-[11px] text-danger">{kpiError}</p>
                   <button
                     onClick={() => { setKpiError(null); setLoading(true); setRetryCount((c) => c + 1); }}
-                    className="text-xs text-[#00B5AD] hover:underline font-medium flex-shrink-0"
+                    className="text-[11px] text-signal hover:underline font-medium flex-shrink-0"
                   >
                     Retry
                   </button>
                 </div>
               )}
               {!kpiError && available.length === 0 ? (
-                <p className="p-5 text-sm text-gray-400">No KPIs match the current filter.</p>
+                <p className="p-5 text-[12px] text-mist">No KPIs match the current filter.</p>
               ) : !kpiError && (
-                <ul className="divide-y divide-gray-50">
+                <ul className="divide-y divide-rim/50">
                   {available.map((kpi) => (
                     <li
                       key={kpi.kpi_id}
-                      // H13: Single click on row adds KPI; checkbox click stops propagation so no double-fire
                       onClick={() => addKpi(kpi)}
                       onDoubleClick={() => setCommentOpen(commentOpen === kpi.kpi_id ? null : kpi.kpi_id)}
-                      className="px-5 py-3 hover:bg-gray-50 cursor-pointer group"
+                      className="px-5 py-3.5 hover:bg-raised/60 cursor-pointer group transition-colors"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-3 min-w-0">
-                          <input
-                            type="checkbox"
-                            checked={false}
-                            onChange={() => {/* handled by parent li onClick */}}
-                            onClick={(e) => e.stopPropagation()}
-                            className="mt-0.5 h-4 w-4 rounded accent-teal-600 flex-shrink-0"
-                          />
+                          <div className="mt-0.5 w-4 h-4 rounded border-2 border-rim group-hover:border-signal/50 transition-colors flex-shrink-0" />
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-800 truncate">{kpi.display_name}</p>
-                            <p className="text-xs text-gray-400 font-mono truncate">{kpi.formula}</p>
+                            <p className="text-[12px] font-semibold text-ink truncate">{kpi.display_name}</p>
+                            <p className="text-[10px] text-mist font-mono truncate mt-0.5">{kpi.formula}</p>
                             {commentOpen === kpi.kpi_id && (
                               <input
                                 type="text"
@@ -235,23 +227,23 @@ export default function KpisPage() {
                                 value={comment[kpi.kpi_id] ?? ""}
                                 onChange={(e) => setComment({ ...comment, [kpi.kpi_id]: e.target.value })}
                                 onClick={(e) => e.stopPropagation()}
-                                className="mt-1.5 text-xs border border-gray-200 rounded px-2 py-1 w-full focus:outline-none"
+                                className="mt-1.5 text-[11px] border border-rim bg-wash rounded px-2 py-1 w-full focus:outline-none focus:border-signal text-ink"
                                 autoFocus
                               />
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className={`text-xs font-semibold ${CONF_COLOR(kpi.confidence)}`}>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <span className={`text-[10px] font-bold ${CONF_STYLE(kpi.confidence)}`}>
                             {Math.round(kpi.confidence * 100)}%
                           </span>
                           {kpi.domain && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full border capitalize ${DOMAIN_COLORS[kpi.domain] ?? DOMAIN_COLORS.ops}`}>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-semibold capitalize ${DOMAIN_STYLES[kpi.domain] ?? DOMAIN_STYLES.ops}`}>
                               {kpi.domain}
                             </span>
                           )}
                           {kpi.source === "interview" && (
-                            <span className="text-xs bg-pink-50 text-pink-600 border border-pink-100 px-2 py-0.5 rounded-full">custom</span>
+                            <span className="text-[9px] bg-signal/10 text-signal border border-signal/20 px-1.5 py-0.5 rounded-full font-semibold">custom</span>
                           )}
                         </div>
                       </div>
@@ -262,17 +254,22 @@ export default function KpisPage() {
             </div>
           </div>
 
-          {/* Right panel — selected KPIs */}
-          <div className="w-80 flex flex-col bg-gray-50 border-l border-gray-100">
-            <div className="px-4 py-3 border-b border-gray-100 bg-white flex items-center justify-between">
-              <span className="text-sm font-semibold text-gray-700">Selected ({selected.length})</span>
+          {/* Right — selected KPIs */}
+          <div className="w-80 flex flex-col bg-raised/30 border-l border-rim">
+            <div className="px-4 py-3 border-b border-rim bg-card flex items-center justify-between">
+              <span className="text-[12px] font-bold text-ink">Selected</span>
+              <span className="text-[10px] font-mono text-mist bg-wash border border-rim rounded-full px-2 py-0.5">
+                {selected.length}
+              </span>
             </div>
 
             <div className="flex-1 overflow-y-auto">
               {selected.length === 0 ? (
-                <p className="p-4 text-xs text-gray-400">Click KPIs on the left to add them here.</p>
+                <div className="p-6 text-center">
+                  <p className="text-[11px] text-mist">Click KPIs on the left to add them here.</p>
+                </div>
               ) : (
-                <ul className="divide-y divide-gray-100" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+                <ul className="divide-y divide-rim/40" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
                   {selected.map((kpi, i) => (
                     <li
                       key={kpi.kpi_id}
@@ -280,19 +277,19 @@ export default function KpisPage() {
                       onDragStart={() => onDragStart(i)}
                       onDragEnter={() => onDragEnter(i)}
                       onDragEnd={onDragEnd}
-                      className="flex items-start gap-2 px-4 py-3 bg-white hover:bg-gray-50 cursor-grab active:cursor-grabbing"
+                      className="flex items-start gap-2.5 px-4 py-3 hover:bg-wash/40 cursor-grab active:cursor-grabbing transition-colors"
                     >
-                      <span className="text-gray-300 mt-0.5 flex-shrink-0">⠿</span>
+                      <span className="text-mist/40 mt-0.5 flex-shrink-0 text-[12px] select-none">⠿</span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 truncate">{kpi.display_name}</p>
-                        <p className="text-xs text-gray-400 font-mono truncate">{kpi.formula}</p>
+                        <p className="text-[11px] font-semibold text-ink truncate">{kpi.display_name}</p>
+                        <p className="text-[10px] text-mist font-mono truncate mt-0.5">{kpi.formula}</p>
                         {comment[kpi.kpi_id] && (
-                          <p className="text-xs text-gray-400 italic mt-0.5">{comment[kpi.kpi_id]}</p>
+                          <p className="text-[10px] text-dim italic mt-0.5">{comment[kpi.kpi_id]}</p>
                         )}
                       </div>
                       <button
                         onClick={() => removeKpi(kpi.kpi_id)}
-                        className="text-gray-300 hover:text-red-400 text-lg leading-none flex-shrink-0 mt-0.5"
+                        className="text-mist/50 hover:text-danger text-base leading-none flex-shrink-0 mt-0.5 transition-colors"
                       >
                         ×
                       </button>
@@ -302,11 +299,11 @@ export default function KpisPage() {
               )}
             </div>
 
-            {/* Add custom KPI */}
-            <div className="border-t border-gray-100 bg-white">
+            {/* Custom KPI form */}
+            <div className="border-t border-rim bg-card">
               {addingCustom ? (
-                <div className="p-4 space-y-2 bg-teal-50/40">
-                  <p className="text-xs font-semibold text-gray-600">New custom KPI</p>
+                <div className="p-4 space-y-2.5 bg-signal/5 border-t border-signal/15">
+                  <p className="text-[10px] font-bold text-signal uppercase tracking-[0.1em]">New custom KPI</p>
                   <input
                     type="text"
                     autoFocus
@@ -314,7 +311,7 @@ export default function KpisPage() {
                     value={customName}
                     onChange={(e) => setCustomName(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") addCustom(); if (e.key === "Escape") cancelCustom(); }}
-                    className="w-full text-xs border border-teal-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#00B5AD]"
+                    className="w-full text-[11px] border border-rim bg-raised rounded-lg px-2.5 py-2 focus:outline-none focus:border-signal text-ink"
                   />
                   <input
                     type="text"
@@ -322,40 +319,40 @@ export default function KpisPage() {
                     value={customFormula}
                     onChange={(e) => setCustomFormula(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") addCustom(); if (e.key === "Escape") cancelCustom(); }}
-                    className="w-full text-xs border border-teal-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#00B5AD] font-mono"
+                    className="w-full text-[11px] border border-rim bg-raised rounded-lg px-2.5 py-2 focus:outline-none focus:border-signal font-mono text-ink"
                   />
-                  <div className="flex gap-2">
+                  <div className="flex gap-3">
                     <button
                       onClick={addCustom}
                       disabled={!customName.trim() || !customFormula.trim()}
-                      className="text-xs text-[#00B5AD] font-medium hover:underline disabled:opacity-40"
+                      className="text-[11px] text-signal font-semibold hover:underline disabled:opacity-40"
                     >
                       Add
                     </button>
-                    <span className="text-gray-300">·</span>
-                    <button onClick={cancelCustom} className="text-xs text-gray-400 hover:text-gray-600">
-                      Cancel
-                    </button>
+                    <button onClick={cancelCustom} className="text-[11px] text-mist hover:text-dim">Cancel</button>
                   </div>
                 </div>
               ) : (
-                <div className="px-4 py-2.5">
+                <div className="px-4 py-3">
                   <button
                     onClick={() => setAddingCustom(true)}
-                    className="text-xs text-[#00B5AD] hover:underline font-medium"
+                    className="text-[11px] text-signal/70 hover:text-signal font-medium transition-colors flex items-center gap-1"
                   >
-                    + Add custom KPI
+                    <span>+</span> Add custom KPI
                   </button>
                 </div>
               )}
             </div>
 
             {/* Continue button */}
-            <div className="border-t border-gray-100 p-4 bg-white">
+            <div className="border-t border-rim p-4 bg-card">
               <button
                 onClick={handleContinue}
                 disabled={selected.length === 0}
-                className="w-full py-2.5 rounded-xl text-sm font-medium bg-[#1B2340] text-white hover:bg-[#243060] disabled:opacity-40 transition-colors"
+                className={`w-full py-2.5 rounded-xl text-[12px] font-semibold transition-all
+                  ${selected.length > 0
+                    ? "bg-signal text-white hover:bg-signal/90 shadow-sm"
+                    : "bg-raised text-mist cursor-not-allowed border border-rim"}`}
               >
                 {`Continue to Dimensions (${selected.length} KPIs) →`}
               </button>
