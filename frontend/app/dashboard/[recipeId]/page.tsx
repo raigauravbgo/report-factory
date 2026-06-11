@@ -601,7 +601,7 @@ export default function DashboardPage() {
                       : undefined;
                     return (
                       <ChartCard
-                        key={bk.kpi}
+                        key={`${bk.kpi}-${bk.dimension}`}
                         title={`${bk.kpi.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} by ${bk.dimension}`}
                         subtitle={`${bk.data.length} groups`}
                         takeaway={takeaway}

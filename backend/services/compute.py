@@ -765,13 +765,14 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
                     d_sum = d.sum()
                     return float(n.sum() / d_sum) if d_sum != 0 else pd.NA
                 # include_groups was removed in pandas 2.3 (groups excluded by default)
-                grouped = df_reset.groupby(_dim).apply(_ros_group).dropna()
+                grouped = df_reset.groupby(_dim).apply(_ros_group, include_groups=False).dropna()
             else:
                 # L5: bind loop variables in default args to capture current iteration values
                 grouped = df_reset.groupby(_dim).apply(
                     lambda g, _f=formula, _a=agg: _eval_formula(g, _f).mean()
                     if _a in ("mean", "ratio")
                     else _eval_formula(g, _f).sum(),
+                    include_groups=False,
                 ).dropna()
             if not grouped.empty:
                 breakdown.append({
