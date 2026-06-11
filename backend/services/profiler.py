@@ -29,6 +29,19 @@ _MAX_DIMENSION_UNIQUES = 100
 # Grain: columns with unique_count / row_count >= this are grain candidates
 _GRAIN_THRESHOLD = 0.95
 
+# Substrings that indicate a column is a numeric metric even with few unique values
+# (e.g. csat_score=0/1, avg_csat_rating=1-5, adherence_pct=90/95/100)
+_METRIC_NAME_SUBSTR: frozenset[str] = frozenset({
+    "score", "rating", "pct", "percent", "rate",
+    "count", "volume", "avg", "average", "qty", "quantity",
+})
+
+
+def _is_metric_name(name: str) -> bool:
+    """Return True when the column name contains a known metric keyword substring."""
+    n = name.lower()
+    return any(kw in n for kw in _METRIC_NAME_SUBSTR)
+
 
 def profile(df: pd.DataFrame, upload_id: int) -> ProfilingResult:
     row_count = len(df)
@@ -86,7 +99,7 @@ def _classify(
         return "date", "date"
 
     if pd.api.types.is_numeric_dtype(series):
-        if unique_count <= 5:
+        if unique_count <= 5 and not _is_metric_name(name):
             return "categorical", "dimension"
         return "numeric", "measure"
 
@@ -99,7 +112,7 @@ def _classify(
         sample = non_null.head(200).astype(str).str.strip().str.replace(",", "", regex=False)
         coerced = pd.to_numeric(sample, errors="coerce")
         if coerced.notna().mean() >= 0.85:
-            if unique_count <= 5:
+            if unique_count <= 5 and not _is_metric_name(name):
                 return "categorical", "dimension"
             return "numeric", "measure"
 
