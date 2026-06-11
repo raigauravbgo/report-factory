@@ -18,6 +18,7 @@ def _load_staging_df(
     table_name: "str | list[str]",
     confirmed_relationships: "list[dict] | None" = None,
     upload_table_map: "dict[str, str] | None" = None,
+    filter_cols: "list[str] | None" = None,
 ) -> pd.DataFrame:
     """Load one or more staging tables.
 
@@ -46,7 +47,136 @@ def _load_staging_df(
         return _apply_relationships(dfs, names, confirmed_relationships, upload_table_map)
 
     # Default: raw concat — columns absent in one file become NaN for its rows.
+    # When filter_cols are provided and there are 2+ tables, enrich tables that
+    # are missing filter columns so they survive the downstream filter.
+    if filter_cols and len(dfs) >= 2:
+        return _apply_same_dimension_enrichment(dfs, names, filter_cols)
     return pd.concat(dfs, ignore_index=True, sort=False)
+
+
+def _apply_same_dimension_enrichment(
+    dfs: "list[pd.DataFrame]",
+    table_names: "list[str]",
+    filter_cols: "list[str]",
+) -> pd.DataFrame:
+    """Left-join filter columns from sibling tables into tables that lack them.
+
+    When a filter is active (e.g. location=Gurgaon) and some fact tables do not
+    contain the filter column, those tables would lose ALL rows after filtering.
+    This function detects those tables and enriches them from a sibling table
+    that (a) has the filter column and (b) shares a join key.
+
+    Join-key priority (first match wins):
+        agent_email, email, agent_id, user_id, agent_name
+        then any shared non-numeric column present in both DataFrames.
+
+    Parameters
+    ----------
+    dfs         : list of DataFrames, one per staging table (same order as table_names)
+    table_names : corresponding staging table names (used only for logging)
+    filter_cols : column names that must be present for filtering to work
+    """
+    _PRIORITY_KEYS = ["agent_email", "email", "agent_id", "user_id", "agent_name"]
+
+    enriched = list(dfs)  # work on a copy of the list
+
+    for i, df in enumerate(dfs):
+        missing = [c for c in filter_cols if c not in df.columns]
+        if not missing:
+            continue  # this table already has all filter columns — nothing to do
+
+        # Prefer a single donor that covers ALL missing columns — this keeps
+        # multi-column filters consistent (e.g. both location and department come
+        # from CSAT via agent_email rather than location from CSAT and department
+        # from Adherence via agent_id, which would produce an inconsistent mapping).
+        # Rank candidates by: (1) best join-key priority — agent_email beats agent_id;
+        # (2) total cardinality as tiebreaker for broadest coverage.
+        def _join_key_rank(candidate_j: int, left_df: "pd.DataFrame") -> int:
+            """Lower rank = better join key (index in _PRIORITY_KEYS)."""
+            donor_df = dfs[candidate_j]
+            for rank, k in enumerate(_PRIORITY_KEYS):
+                if k in left_df.columns and k in donor_df.columns:
+                    return rank
+            return len(_PRIORITY_KEYS)
+
+        all_covering = [
+            j for j, other in enumerate(dfs)
+            if j != i and all(c in other.columns for c in missing)
+        ]
+        if all_covering:
+            best_j = min(
+                all_covering,
+                key=lambda j: (
+                    _join_key_rank(j, enriched[i]),
+                    -sum(int(dfs[j][c].nunique()) for c in missing),
+                ),
+            )
+            donor_to_cols: dict[int, list[str]] = {best_j: list(missing)}
+        else:
+            # No single donor has all columns — fall back to per-column best donor.
+            col_to_donor: dict[str, int] = {}
+            for col in missing:
+                best_card = -1
+                best_j2: int | None = None
+                for j, other in enumerate(dfs):
+                    if j == i or col not in other.columns:
+                        continue
+                    card = int(other[col].nunique())
+                    if card > best_card:
+                        best_card = card
+                        best_j2 = j
+                if best_j2 is not None:
+                    col_to_donor[col] = best_j2
+                else:
+                    logger.debug(
+                        "ENRICH_SKIP table=%s col=%s — no sibling has this column",
+                        table_names[i], col,
+                    )
+            donor_to_cols = {}
+            for col, donor_j in col_to_donor.items():
+                donor_to_cols.setdefault(donor_j, []).append(col)
+
+        for donor_j, cols_to_add in donor_to_cols.items():
+            donor = dfs[donor_j]
+
+            # Find join key: priority list first, then any shared non-numeric column
+            join_key: str | None = None
+            for k in _PRIORITY_KEYS:
+                if k in enriched[i].columns and k in donor.columns:
+                    join_key = k
+                    break
+            if join_key is None:
+                for k in enriched[i].columns:
+                    if (
+                        k in donor.columns
+                        and not pd.api.types.is_numeric_dtype(enriched[i][k])
+                        and not pd.api.types.is_numeric_dtype(donor[k])
+                    ):
+                        join_key = k
+                        break
+
+            if join_key is None:
+                logger.debug(
+                    "ENRICH_SKIP table=%s cols=%s — no shared join key with donor index %d",
+                    table_names[i], cols_to_add, donor_j,
+                )
+                continue
+
+            # Build a deduplicated lookup with all needed columns from this donor.
+            # Coerce join key to str on both sides to handle int64/object dtype mismatches.
+            lookup_cols = [join_key] + cols_to_add
+            lookup = donor[lookup_cols].drop_duplicates(subset=[join_key]).copy()
+            left_df = enriched[i].copy()
+            if left_df[join_key].dtype != lookup[join_key].dtype:
+                left_df[join_key] = left_df[join_key].astype(str)
+                lookup[join_key] = lookup[join_key].astype(str)
+            enriched[i] = left_df.merge(lookup, on=join_key, how="left", suffixes=("", "_enr"))
+            logger.info(
+                "ENRICH table=%s cols=%s via join_key=%s from donor index %d",
+                table_names[i], cols_to_add, join_key, donor_j,
+            )
+
+    return pd.concat(enriched, ignore_index=True, sort=False)
 
 
 def _apply_relationships(
@@ -602,6 +732,7 @@ def compute_dashboard(recipe_config: dict, staging_table_name: "str | list[str]"
         staging_table_name,
         confirmed_relationships=_confirmed_rels or None,
         upload_table_map=_upload_table_map or None,
+        filter_cols=list(filters.keys()) if filters else None,
     )
     if df.empty:
         return {"kpi_summaries": [], "time_series": [], "breakdown": []}
