@@ -4,6 +4,11 @@ TDD tests for virtual_dimension.build_virtual_dimension().
 The virtual dimension is a generated dimension table built from columns
 that appear consistently across 2+ fact tables when no real Roster/dimension
 file was uploaded. It lets dimension-based filters work even without Roster.
+
+Single-table mode (auto-triggered when only 1 fact table is available):
+only columns that are STABLE per entity (same value for all rows of that
+agent) are included — evaluation-specific columns like rubric_name are
+excluded even though they are non-numeric.
 """
 import pandas as pd
 import pytest
@@ -184,3 +189,126 @@ def test_single_table_with_min_tables_one():
     assert result is not None
     assert "agent_email" in result.columns
     assert "location" in result.columns
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — single-table auto mode: stable columns included
+# ---------------------------------------------------------------------------
+def test_single_table_auto_includes_stable_columns():
+    """
+    build_virtual_dimension with a single table and min_tables=1 must
+    only include columns whose value does not vary within each entity.
+
+    5 agents × 2 evaluations each.
+    agent_name is the SAME for all rows of each agent → included.
+    rubric_name CHANGES between rows for the same agent → excluded.
+    agent_email has the highest cardinality (5) → entity key.
+    """
+    from services.virtual_dimension import build_virtual_dimension
+
+    # 5 agents, each with 2 evaluations using different rubrics
+    emails = [f"agent{i}@x.com" for i in range(5) for _ in range(2)]  # 10 rows
+    names  = [f"Agent {i}"       for i in range(5) for _ in range(2)]
+    rubrics = ["Rubric A", "Rubric B"] * 5  # alternates per evaluation
+
+    df = pd.DataFrame({
+        "agent_email": emails,
+        "agent_name":  names,
+        "rubric_name": rubrics,
+    })
+
+    result = build_virtual_dimension([("t1", df)], min_tables=1)
+
+    assert result is not None
+    assert "agent_email" in result.columns
+    assert "agent_name" in result.columns
+    # rubric_name varies per agent — must be excluded
+    assert "rubric_name" not in result.columns
+    # deduplicated: one row per agent
+    assert len(result) == 5
+
+
+# ---------------------------------------------------------------------------
+# Test 10 — single-table auto mode: unstable column excluded, dim col kept
+# ---------------------------------------------------------------------------
+def test_single_table_auto_excludes_per_row_columns():
+    """
+    grade_type varies per evaluation even for the same agent → excluded.
+    location is consistent for each agent → included.
+    5 agents, each appearing in 2 rows.
+    """
+    from services.virtual_dimension import build_virtual_dimension
+
+    emails    = [f"agent{i}@x.com" for i in range(5) for _ in range(2)]
+    locations = [("Boston" if i < 3 else "London") for i in range(5) for _ in range(2)]
+    grades    = ["standard", "calibration"] * 5  # alternates → unstable per agent
+
+    df = pd.DataFrame({
+        "agent_email": emails,
+        "location":    locations,
+        "grade_type":  grades,
+    })
+
+    result = build_virtual_dimension([("t1", df)], min_tables=1)
+
+    assert result is not None
+    assert "location" in result.columns
+    assert "grade_type" not in result.columns
+    assert len(result) == 5
+
+
+# ---------------------------------------------------------------------------
+# Test 11 — works with any column names (proves no hardcoding)
+# ---------------------------------------------------------------------------
+def test_entity_key_detection_is_name_agnostic():
+    """
+    The entity key must be chosen by cardinality, not by column name.
+    Using completely non-email column names: staff_ref, full_name, skill_tag.
+    staff_ref has 5 unique values (highest) → entity key.
+    full_name is stable per staff_ref → included.
+    skill_tag varies per staff_ref → excluded in single-table mode.
+    """
+    from services.virtual_dimension import build_virtual_dimension
+
+    refs   = [f"REF-{i:03d}" for i in range(5) for _ in range(2)]
+    names  = [f"Person {i}"  for i in range(5) for _ in range(2)]
+    skills = ["Skill A", "Skill B"] * 5  # alternates → unstable
+
+    df = pd.DataFrame({
+        "staff_ref":  refs,
+        "full_name":  names,
+        "skill_tag":  skills,
+    })
+
+    result = build_virtual_dimension([("t1", df)], min_tables=1)
+
+    assert result is not None
+    assert "staff_ref" in result.columns
+    assert "full_name" in result.columns
+    assert "skill_tag" not in result.columns
+    assert len(result) == 5
+
+
+# ---------------------------------------------------------------------------
+# Test 12 — store_virtual_dimension auto-detects min_tables=1 for 1 table
+# ---------------------------------------------------------------------------
+def test_store_auto_min_tables_single_file():
+    """
+    build_virtual_dimension with a single staging_df and min_tables=1
+    (the auto-mode used by the endpoint) must return a result.
+    """
+    from services.virtual_dimension import build_virtual_dimension
+
+    df = pd.DataFrame({
+        "staff_id":  ["S001", "S002"],
+        "full_name": ["Alice", "Bob"],
+        "qa_score":  [88.0, 91.0],
+    })
+
+    # With auto-detected min_tables=1, should build from the single table
+    result = build_virtual_dimension([("t1", df)], min_tables=1)
+
+    assert result is not None
+    assert "staff_id" in result.columns
+    assert "full_name" in result.columns
+    assert "qa_score" not in result.columns  # numeric → excluded

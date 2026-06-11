@@ -46,9 +46,25 @@ def build_virtual_dimension(
 
     combined = pd.concat(parts, ignore_index=True)
 
-    # Entity key = highest-cardinality common column (most likely the identifier)
+    # Entity key = highest-cardinality common column (most likely the identifier).
+    # Purely cardinality-based — no column name assumptions.
     cardinalities = {c: int(combined[c].nunique()) for c in common_cols if c in combined.columns}
     entity_key = max(cardinalities, key=lambda c: cardinalities[c])
+
+    # Single-table stability filter: for single-table mode (min_tables=1) only
+    # include columns that are STABLE per entity (same value for every row of
+    # that entity). Evaluation-level columns like rubric_name or grade_type vary
+    # per row and are excluded; true agent attributes like location or team are
+    # the same for all evaluations of the same agent and are kept.
+    if min_tables == 1:
+        stable_cols = [entity_key]
+        for col in common_cols:
+            if col == entity_key or col not in combined.columns:
+                continue
+            max_nunique_per_entity = int(combined.groupby(entity_key)[col].nunique().max())
+            if max_nunique_per_entity <= 1:
+                stable_cols.append(col)
+        combined = combined[stable_cols]
 
     result = combined.drop_duplicates(subset=[entity_key]).reset_index(drop=True)
 
@@ -80,7 +96,10 @@ def store_virtual_dimension(
     from models.upload import Upload
     from services.profiler import profile
 
-    vd_df = build_virtual_dimension(staging_dfs)
+    # Auto-detect: use min_tables=1 when only a single fact table is available
+    # so a single-file dataset can still get a virtual dimension.
+    effective_min_tables = 1 if len(staging_dfs) == 1 else 2
+    vd_df = build_virtual_dimension(staging_dfs, min_tables=effective_min_tables)
     if vd_df is None:
         return None
 
