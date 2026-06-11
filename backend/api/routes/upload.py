@@ -293,6 +293,10 @@ def _parse_and_profile(upload_id: int, s3_key: str, client_id: str) -> None:
         db.add(staging)
         upload.status = "profiled"
         db.commit()
+        # Evict any cached DataFrame that included the old staging table for this
+        # upload so the next dashboard request reads fresh data.
+        from services.compute import invalidate_staging_cache
+        invalidate_staging_cache([f"staging_{upload_id}"])
         logger.info(
             "PROFILING_DONE upload_id=%d rows=%d cols=%d dupes=%d duration=%.2fs",
             upload_id, result.row_count, len(result.columns),
