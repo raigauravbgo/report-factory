@@ -88,7 +88,13 @@ export default function SchemaPage() {
       if (profiledCount > 1) {
         setRelLoading(true);
         api.getRelationships(Number(datasetId))
-          .then(setRelationships)
+          .then((rels) => {
+            setRelationships(rels);
+            sessionStorage.setItem(
+              `dataset_${datasetId}_relationships`,
+              JSON.stringify(rels),
+            );
+          })
           .catch(() => {})
           .finally(() => setRelLoading(false));
       }
