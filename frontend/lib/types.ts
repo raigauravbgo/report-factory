@@ -67,6 +67,8 @@ export interface ProfilingResult {
   sheet_names: string[];
   active_sheet: string;
   grain_suggestions: string[];
+  // AI-suggested table classification; user can override in the schema step
+  table_type?: "fact" | "dimension" | "unknown";
 }
 
 export interface ColumnSchemaOverride {

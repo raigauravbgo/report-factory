@@ -196,6 +196,39 @@ def save_schema_overrides(
     return ProfilingResult(**profile_data)
 
 
+# ── Table type override ───────────────────────────────────────────────────────
+
+@router.patch("/{upload_id}/table-type")
+def update_table_type(
+    upload_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(_get_client_id),
+):
+    """Let the user override the AI-suggested fact/dimension classification.
+
+    Stores the new value in profile_data["table_type"] so it persists and is
+    returned by GET /upload/{id}/profile.
+    """
+    new_type = (body.get("table_type") or "").strip()
+    if new_type not in ("fact", "dimension", "unknown"):
+        raise HTTPException(400, "table_type must be 'fact', 'dimension', or 'unknown'")
+
+    upload = db.query(Upload).filter(Upload.id == upload_id, Upload.client_id == client_id).first()
+    if not upload:
+        raise HTTPException(404, "Upload not found.")
+    staging = db.query(StagingTable).filter(StagingTable.upload_id == upload_id).first()
+    if not staging or not staging.profile_data:
+        raise HTTPException(404, "Profile data not found.")
+
+    profile = dict(staging.profile_data)
+    profile["table_type"] = new_type
+    staging.profile_data = profile
+    db.commit()
+    logger.info("TABLE_TYPE_OVERRIDE upload_id=%d new_type=%s", upload_id, new_type)
+    return {"status": "ok", "upload_id": upload_id, "table_type": new_type}
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _validate_and_read(file: UploadFile) -> tuple[str, bytes]:

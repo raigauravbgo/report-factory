@@ -171,6 +171,23 @@ export default function SchemaPage() {
 
   const activeSheet = tabs[activeTab]?.profile?.active_sheet ?? "";
 
+  async function handleTableTypeChange(tabIndex: number, newType: "fact" | "dimension" | "unknown") {
+    const tab = tabs[tabIndex];
+    if (!tab) return;
+    try {
+      await api.updateTableType(tab.uploadId, newType);
+      setTabs((prev) =>
+        prev.map((t, i) =>
+          i === tabIndex && t.profile
+            ? { ...t, profile: { ...t.profile, table_type: newType } }
+            : t,
+        ),
+      );
+    } catch {
+      // ignore — best-effort, UI already reflects local state
+    }
+  }
+
   async function handleSheetChange(sheet: string) {
     const tab = tabs[activeTab];
     // M3: Guard against concurrent requests from rapid sheet changes
@@ -244,6 +261,12 @@ export default function SchemaPage() {
                 {/* M2: Show error indicator upfront so user sees which tabs failed */}
                 {t.profile === null && <span className="ml-1 text-red-400 text-xs" title="Profile failed to load">⚠</span>}
                 {t.saved && <span className="ml-1 text-teal-500 text-xs">✓</span>}
+                {t.profile?.table_type === "dimension" && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">Dimension</span>
+                )}
+                {t.profile?.table_type === "fact" && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">Fact</span>
+                )}
               </button>
             ))}
           </nav>
@@ -262,6 +285,21 @@ export default function SchemaPage() {
               {tab.profile.delimiter && (
                 <span><strong className="text-gray-700">Delimiter:</strong> <code className="bg-gray-100 px-1 rounded">{tab.profile.delimiter === "\t" ? "TAB" : tab.profile.delimiter}</code></span>
               )}
+              <div className="flex items-center gap-1">
+                <strong className="text-gray-700">Table type:</strong>
+                <select
+                  value={tab.profile.table_type ?? "unknown"}
+                  onChange={(e) =>
+                    handleTableTypeChange(activeTab, e.target.value as "fact" | "dimension" | "unknown")
+                  }
+                  className="text-xs border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#1B2340]"
+                  title="AI-suggested classification — change if incorrect"
+                >
+                  <option value="fact">Fact</option>
+                  <option value="dimension">Dimension</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </div>
               {tab.profile.sheet_names.length > 1 && (
                 <div className="flex items-center gap-1">
                   <strong className="text-gray-700">Sheet:</strong>
@@ -331,6 +369,18 @@ export default function SchemaPage() {
                 onConfirm={handleConfirmRelationships}
               />
             )}
+          </div>
+        )}
+
+        {/* No-dimension notice — shown when all uploaded files are classified as fact/unknown */}
+        {tabs.length > 0 && tabs.filter((t) => t.profile?.table_type === "dimension").length === 0 && (
+          <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-800">
+            <span className="font-semibold">No dimension table detected.</span>{" "}
+            Filters like <span className="font-medium">location</span> and{" "}
+            <span className="font-medium">department</span> will be sourced directly from your
+            fact tables — this works fine for those columns. If you have a separate employee or
+            roster file, mark it as <span className="font-medium">&quot;Dimension&quot;</span> using the
+            Table type dropdown above.
           </div>
         )}
 

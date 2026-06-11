@@ -117,6 +117,42 @@ def generate_from_session(
             len(uploads),
         )
 
+    # Probe all table pairs for cross-name join keys (e.g. Roster.email ↔ CSAT.agent_email).
+    # Stored in recipe config so compute_dashboard can reuse them without re-probing at query time.
+    cross_file_key_pairs: list[dict] = []
+    if len(upload_table_map) >= 2:
+        try:
+            from services.compute import _find_cross_name_join_key as _probe_keys
+            from core.database import engine as _engine
+            import pandas as _pd
+
+            _staging_dfs: dict[str, "_pd.DataFrame"] = {}
+            for _tname in upload_table_map.values():
+                try:
+                    with _engine.connect() as _conn:
+                        _staging_dfs[_tname] = _pd.read_sql_table(_tname, con=_conn)
+                except Exception:
+                    pass
+
+            _tnames = list(_staging_dfs.keys())
+            for _ii in range(len(_tnames)):
+                for _jj in range(_ii + 1, len(_tnames)):
+                    _lt, _rt = _tnames[_ii], _tnames[_jj]
+                    if _lt not in _staging_dfs or _rt not in _staging_dfs:
+                        continue
+                    _pair = _probe_keys(_staging_dfs[_lt], _staging_dfs[_rt])
+                    if _pair:
+                        cross_file_key_pairs.append({
+                            "left_table": _lt, "left_col": _pair[0],
+                            "right_table": _rt, "right_col": _pair[1],
+                        })
+            logger.info(
+                "CROSS_KEY_PROBE dataset_id=%d pairs_found=%d",
+                dataset_id, len(cross_file_key_pairs),
+            )
+        except Exception as _e:
+            logger.warning("CROSS_KEY_PROBE dataset_id=%d error=%s", dataset_id, _e)
+
     # ── Build story sections ───────────────────────────────────────────────
     sections = _build_sections(resolved_kpis, {**interview_result, "domain": domain or "ops"})
 
@@ -143,6 +179,7 @@ def generate_from_session(
         "chart_layout": chart_layout,
         "sections": sections,
         "confirmed_relationships": confirmed_relationships,
+        "cross_file_key_pairs": cross_file_key_pairs,
     }
 
     recipe = ReportRecipe(

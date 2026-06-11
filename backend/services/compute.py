@@ -54,6 +54,58 @@ def _load_staging_df(
     return pd.concat(dfs, ignore_index=True, sort=False)
 
 
+def _find_cross_name_join_key(
+    left_df: pd.DataFrame,
+    donor_df: pd.DataFrame,
+    min_overlap: float = 0.65,
+    sample_size: int = 200,
+) -> "tuple[str, str] | None":
+    """Return (left_col, donor_col) with the highest value-overlap, or None.
+
+    Used when exact priority-key name matching fails — e.g. Roster.email and
+    CSAT.agent_email contain the same email addresses under different column names.
+    Only considers non-numeric columns; the overlap threshold is the sole guard
+    against false positives.  We intentionally skip any cardinality upper-bound
+    filter because identifier columns (emails, IDs) naturally have high cardinality
+    in dimension tables (e.g. Roster.email where every row is unique).
+
+    Parameters
+    ----------
+    left_df      : DataFrame that needs enrichment (e.g. df_csat)
+    donor_df     : DataFrame that has the filter column (e.g. df_roster)
+    min_overlap  : minimum fraction of left_col values that must appear in donor_col
+    sample_size  : max rows sampled from left_col for the overlap check
+    """
+    best: "tuple[str, str, float] | None" = None
+
+    for lc in left_df.columns:
+        if pd.api.types.is_numeric_dtype(left_df[lc]):
+            continue
+        left_sample = set(left_df[lc].dropna().astype(str).head(sample_size))
+        if not left_sample:
+            continue
+        for rc in donor_df.columns:
+            if rc == lc:
+                continue  # skip identical names — handled by priority-key path
+            if pd.api.types.is_numeric_dtype(donor_df[rc]):
+                continue
+            donor_vals = set(donor_df[rc].dropna().astype(str))
+            if not donor_vals:
+                continue
+            overlap = len(left_sample & donor_vals) / len(left_sample)
+            if overlap >= min_overlap:
+                if best is None or overlap > best[2]:
+                    best = (lc, rc, overlap)
+
+    if best:
+        logger.info(
+            "CROSS_NAME_JOIN_KEY left_col=%s donor_col=%s overlap=%.2f",
+            best[0], best[1], best[2],
+        )
+        return (best[0], best[1])
+    return None
+
+
 def _apply_same_dimension_enrichment(
     dfs: "list[pd.DataFrame]",
     table_names: "list[str]",
@@ -66,9 +118,19 @@ def _apply_same_dimension_enrichment(
     This function detects those tables and enriches them from a sibling table
     that (a) has the filter column and (b) shares a join key.
 
-    Join-key priority (first match wins):
-        agent_email, email, agent_id, user_id, agent_name
-        then any shared non-numeric column present in both DataFrames.
+    Join key detection is fully data-driven — no column names are hardcoded:
+
+    Step 1 — same-name: shared non-float columns ranked by cardinality.
+        High cardinality = identifier (email, ID); low = category (location, dept).
+        Float columns are skipped (they are measures, not identifiers), but
+        integer ID columns are included.
+
+    Step 2 — cross-name: value-overlap probe via _find_cross_name_join_key.
+        Used when no same-name joinable column exists — e.g. Roster.email and
+        CSAT.agent_email are the same data under different names.
+
+    This design works for any dataset (BPO, hospital, retail, HR, etc.) without
+    any knowledge of column naming conventions.
 
     Parameters
     ----------
@@ -76,29 +138,39 @@ def _apply_same_dimension_enrichment(
     table_names : corresponding staging table names (used only for logging)
     filter_cols : column names that must be present for filtering to work
     """
-    _PRIORITY_KEYS = ["agent_email", "email", "agent_id", "user_id", "agent_name"]
 
-    enriched = list(dfs)  # work on a copy of the list
+    def _joinable(series: "pd.Series") -> bool:
+        """True for columns that can be join keys: non-float (strings + integer IDs)."""
+        return not pd.api.types.is_float_dtype(series)
+
+    def _donor_join_strength(candidate_j: int, left_df: "pd.DataFrame") -> int:
+        """Negative cardinality of the best shared joinable column.
+
+        Ranks competing donors: the one sharing the highest-cardinality joinable
+        column is most likely to produce a correct many-to-one lookup.
+        Lower return value = better donor (used with min() for ranking).
+        """
+        donor_df = dfs[candidate_j]
+        shared = [
+            k for k in left_df.columns
+            if k in donor_df.columns
+            and _joinable(left_df[k])
+            and _joinable(donor_df[k])
+        ]
+        return -max((int(left_df[k].nunique()) for k in shared), default=0)
+
+    enriched = list(dfs)
 
     for i, df in enumerate(dfs):
         missing = [c for c in filter_cols if c not in df.columns]
         if not missing:
             continue  # this table already has all filter columns — nothing to do
 
-        # Prefer a single donor that covers ALL missing columns — this keeps
-        # multi-column filters consistent (e.g. both location and department come
-        # from CSAT via agent_email rather than location from CSAT and department
-        # from Adherence via agent_id, which would produce an inconsistent mapping).
-        # Rank candidates by: (1) best join-key priority — agent_email beats agent_id;
-        # (2) total cardinality as tiebreaker for broadest coverage.
-        def _join_key_rank(candidate_j: int, left_df: "pd.DataFrame") -> int:
-            """Lower rank = better join key (index in _PRIORITY_KEYS)."""
-            donor_df = dfs[candidate_j]
-            for rank, k in enumerate(_PRIORITY_KEYS):
-                if k in left_df.columns and k in donor_df.columns:
-                    return rank
-            return len(_PRIORITY_KEYS)
-
+        # Prefer a single donor that covers ALL missing columns for consistency —
+        # both location and department from the same table via the same join key
+        # produces a coherent result; mixing donors can create mismatched mappings.
+        # Rank by: (1) strength of shared join key; (2) total filter-col cardinality
+        # as tiebreaker to prefer the broadest data source.
         all_covering = [
             j for j, other in enumerate(dfs)
             if j != i and all(c in other.columns for c in missing)
@@ -107,13 +179,13 @@ def _apply_same_dimension_enrichment(
             best_j = min(
                 all_covering,
                 key=lambda j: (
-                    _join_key_rank(j, enriched[i]),
+                    _donor_join_strength(j, enriched[i]),
                     -sum(int(dfs[j][c].nunique()) for c in missing),
                 ),
             )
             donor_to_cols: dict[int, list[str]] = {best_j: list(missing)}
         else:
-            # No single donor has all columns — fall back to per-column best donor.
+            # No single donor covers all columns — fall back to per-column best donor.
             col_to_donor: dict[str, int] = {}
             for col in missing:
                 best_card = -1
@@ -139,33 +211,41 @@ def _apply_same_dimension_enrichment(
         for donor_j, cols_to_add in donor_to_cols.items():
             donor = dfs[donor_j]
 
-            # Find join key: priority list first, then any shared non-numeric column
-            join_key: str | None = None
-            for k in _PRIORITY_KEYS:
-                if k in enriched[i].columns and k in donor.columns:
-                    join_key = k
-                    break
+            # Step 1: same-name join key — shared joinable column with highest cardinality.
+            shared = [
+                k for k in enriched[i].columns
+                if k in donor.columns
+                and _joinable(enriched[i][k])
+                and _joinable(donor[k])
+            ]
+            join_key: str | None = (
+                max(shared, key=lambda k: int(enriched[i][k].nunique())) if shared else None
+            )
+
+            # Step 2: cross-name join key — value-overlap probe for the case where
+            # the same identifier column has different names in the two tables.
+            cross_rename: "str | None" = None
             if join_key is None:
-                for k in enriched[i].columns:
-                    if (
-                        k in donor.columns
-                        and not pd.api.types.is_numeric_dtype(enriched[i][k])
-                        and not pd.api.types.is_numeric_dtype(donor[k])
-                    ):
-                        join_key = k
-                        break
+                cross = _find_cross_name_join_key(enriched[i], donor)
+                if cross:
+                    left_key, donor_key = cross
+                    join_key = left_key
+                    cross_rename = donor_key
 
             if join_key is None:
                 logger.debug(
-                    "ENRICH_SKIP table=%s cols=%s — no shared join key with donor index %d",
+                    "ENRICH_SKIP table=%s cols=%s — no join key found with donor index %d",
                     table_names[i], cols_to_add, donor_j,
                 )
                 continue
 
-            # Build a deduplicated lookup with all needed columns from this donor.
-            # Coerce join key to str on both sides to handle int64/object dtype mismatches.
-            lookup_cols = [join_key] + cols_to_add
-            lookup = donor[lookup_cols].drop_duplicates(subset=[join_key]).copy()
+            # Build a deduplicated lookup; coerce join key dtype if needed.
+            lookup_cols_donor = ([cross_rename] if cross_rename else [join_key]) + cols_to_add
+            lookup = donor[[c for c in lookup_cols_donor if c in donor.columns]].drop_duplicates(
+                subset=[cross_rename if cross_rename else join_key]
+            ).copy()
+            if cross_rename:
+                lookup = lookup.rename(columns={cross_rename: join_key})
             left_df = enriched[i].copy()
             if left_df[join_key].dtype != lookup[join_key].dtype:
                 left_df[join_key] = left_df[join_key].astype(str)

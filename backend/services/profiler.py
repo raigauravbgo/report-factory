@@ -35,6 +35,7 @@ def profile(df: pd.DataFrame, upload_id: int) -> ProfilingResult:
     duplicate_row_count = int(df.duplicated().sum())
     columns = [_profile_column(df[col], col, row_count) for col in df.columns]
     grain_suggestions = _infer_grain_suggestions(columns)
+    table_type = _classify_table_type(row_count, [c.model_dump() for c in columns])
 
     return ProfilingResult(
         upload_id=upload_id,
@@ -42,6 +43,7 @@ def profile(df: pd.DataFrame, upload_id: int) -> ProfilingResult:
         duplicate_row_count=duplicate_row_count,
         columns=columns,
         grain_suggestions=grain_suggestions,
+        table_type=table_type,
     )
 
 
@@ -152,6 +154,28 @@ def _infer_semantic_tag(
     if detected_type == "text":
         return "text"
     return "dimension"
+
+
+def _classify_table_type(row_count: int, col_profiles: "list[dict]") -> str:
+    """Heuristic: classify a table as 'fact', 'dimension', or 'unknown'.
+
+    Rules (first match wins):
+    - fact      : has ≥1 date column OR ≥20% measure columns
+    - dimension : no dates AND <10% measures AND row_count < 10,000
+    - unknown   : everything else
+    """
+    if not col_profiles:
+        return "unknown"
+    total = len(col_profiles)
+    measures = sum(1 for c in col_profiles if c.get("suggested_role") == "measure")
+    dates = sum(1 for c in col_profiles if c.get("suggested_role") == "date")
+    measure_ratio = measures / total
+
+    if dates > 0 or measure_ratio >= 0.20:
+        return "fact"
+    if measure_ratio < 0.10 and dates == 0 and row_count < 10_000:
+        return "dimension"
+    return "unknown"
 
 
 def _infer_grain_suggestions(columns: list[ColumnProfile]) -> list[str]:

@@ -417,3 +417,138 @@ def test_enrich_three_table_dataset():
     qa_rows = result[result["rubric_score"].notna()]
     assert len(qa_rows) == 3
     assert qa_rows["location"].notna().all(), "QA rows must have location after enrichment"
+
+
+# ---------------------------------------------------------------------------
+# Test 12 — _find_cross_name_join_key: detects email ↔ agent_email overlap
+# ---------------------------------------------------------------------------
+def test_find_cross_name_join_key_detects_email_variants():
+    """
+    Roster.email and CSAT.agent_email contain the same values under different
+    column names.  _find_cross_name_join_key must return ("email", "agent_email").
+    """
+    from services.compute import _find_cross_name_join_key  # noqa: PLC0415
+
+    emails = [f"user{i}@x.com" for i in range(100)]
+    df_roster = pd.DataFrame({
+        "email": emails,
+        "workday_name": [f"Name {i}" for i in range(100)],
+        "team_lead_supervisor": [f"TL-{i % 5}" for i in range(100)],
+    })
+    df_csat = pd.DataFrame({
+        "agent_email": emails,
+        "avg_csat_rating": [4.0] * 100,
+        "location": ["Gurgaon"] * 50 + ["Manila"] * 50,
+    })
+
+    result = _find_cross_name_join_key(df_roster, df_csat)
+
+    assert result is not None, "_find_cross_name_join_key must find the email↔agent_email pair"
+    left_col, right_col = result
+    assert left_col == "email", f"Expected left_col='email', got '{left_col}'"
+    assert right_col == "agent_email", f"Expected right_col='agent_email', got '{right_col}'"
+
+
+# ---------------------------------------------------------------------------
+# Test 13 — _find_cross_name_join_key: returns None when no sufficient overlap
+# ---------------------------------------------------------------------------
+def test_find_cross_name_join_key_returns_none_when_no_overlap():
+    """
+    When no column pair has >=65% value overlap, the function returns None
+    without raising.
+    """
+    from services.compute import _find_cross_name_join_key  # noqa: PLC0415
+
+    df_a = pd.DataFrame({"x_id": ["a", "b", "c"], "val": [1, 2, 3]})
+    df_b = pd.DataFrame({"y_id": ["d", "e", "f"], "location": ["G", "M", "H"]})
+
+    result = _find_cross_name_join_key(df_a, df_b)
+
+    assert result is None, (
+        f"Expected None when there is no value overlap, got {result}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 14 — enrichment via cross-name key: Roster.email → CSAT.agent_email
+# ---------------------------------------------------------------------------
+def test_enrich_roster_to_fact_via_cross_name_key():
+    """
+    Simulates Roster dimension joining to CSAT fact table via cross-name key
+    (Roster.email ↔ CSAT.agent_email).  team_lead_supervisor must propagate to
+    CSAT rows even though the two tables share no identically-named join key.
+    """
+    from services.compute import _apply_same_dimension_enrichment  # noqa: PLC0415
+
+    emails = [f"u{i}@x.com" for i in range(5)]
+    df_roster = pd.DataFrame({
+        "email": emails,
+        "team_lead_supervisor": ["TL-A", "TL-A", "TL-B", "TL-B", "TL-C"],
+        "workday_name": [f"Name {i}" for i in range(5)],
+    })
+    df_csat = pd.DataFrame({
+        "agent_email": emails,
+        "avg_csat_rating": [4.0, 3.5, 4.2, 3.8, 4.6],
+    })
+
+    result = _apply_same_dimension_enrichment(
+        [df_roster, df_csat],
+        ["staging_roster", "staging_csat"],
+        ["team_lead_supervisor"],
+    )
+
+    assert isinstance(result, pd.DataFrame)
+    assert "team_lead_supervisor" in result.columns, (
+        "team_lead_supervisor must be present after cross-name enrichment"
+    )
+    csat_rows = result[result["avg_csat_rating"].notna()]
+    assert not csat_rows.empty, "CSAT rows must not be dropped"
+    assert csat_rows["team_lead_supervisor"].notna().all(), (
+        "All CSAT rows must have team_lead_supervisor after enrichment via "
+        "cross-name key Roster.email ↔ CSAT.agent_email"
+    )
+    # Spot-check: u0 and u1 → TL-A
+    assert csat_rows[csat_rows["agent_email"] == "u0@x.com"].iloc[0]["team_lead_supervisor"] == "TL-A"
+    assert csat_rows[csat_rows["agent_email"] == "u2@x.com"].iloc[0]["team_lead_supervisor"] == "TL-B"
+
+
+# ---------------------------------------------------------------------------
+# Test 15 — _classify_table_type: roster-like data → "dimension"
+# ---------------------------------------------------------------------------
+def test_classify_dimension_table():
+    """
+    A small table with no measure/date columns must be classified as 'dimension'.
+    Typical example: Roster with employee attributes only.
+    """
+    from services.profiler import _classify_table_type  # noqa: PLC0415
+
+    col_profiles = [
+        {"suggested_role": "dimension"} for _ in range(8)
+    ]
+    result = _classify_table_type(row_count=300, col_profiles=col_profiles)
+    assert result == "dimension", (
+        f"Expected 'dimension' for small all-dimension-column table, got '{result}'"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 16 — _classify_table_type: CSAT-like data → "fact"
+# ---------------------------------------------------------------------------
+def test_classify_fact_table():
+    """
+    A table with date and measure columns must be classified as 'fact'.
+    Typical example: CSAT survey data with avg_rating and survey_date.
+    """
+    from services.profiler import _classify_table_type  # noqa: PLC0415
+
+    col_profiles = [
+        {"suggested_role": "date"},
+        {"suggested_role": "measure"},
+        {"suggested_role": "measure"},
+        {"suggested_role": "dimension"},
+        {"suggested_role": "dimension"},
+    ]
+    result = _classify_table_type(row_count=18000, col_profiles=col_profiles)
+    assert result == "fact", (
+        f"Expected 'fact' for table with date and measure columns, got '{result}'"
+    )

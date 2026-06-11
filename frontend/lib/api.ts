@@ -65,6 +65,16 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  updateTableType: (
+    uploadId: number,
+    tableType: "fact" | "dimension" | "unknown",
+  ): Promise<{ status: string; upload_id: number; table_type: string }> =>
+    request(`/upload/${uploadId}/table-type`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ table_type: tableType }),
+    }),
+
   // ── Session endpoints ────────────────────────────────────────────────────────
   getRelationships: (datasetId: number): Promise<RelationshipSuggestion[]> =>
     request<RelationshipSuggestion[]>(`/session/${datasetId}/relationships`, { method: "POST" }),

@@ -54,6 +54,8 @@ class ProfilingResult(BaseModel):
     sheet_names: list[str] = []
     active_sheet: str = ""
     grain_suggestions: list[str] = []
+    # AI-suggested table classification; user can override via PATCH /upload/{id}/table-type
+    table_type: str = "unknown"
 
 
 class ColumnRoleOverride(BaseModel):
