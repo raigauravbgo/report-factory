@@ -22,6 +22,11 @@ export default function KpiSelectionPage({ params }: PageProps) {
   // which custom KPI rows are selected (index-based); new rows default to selected
   const [customSelected, setCustomSelected] = useState<Set<number>>(new Set());
   const [availableCols, setAvailableCols] = useState<string[]>([]);
+  // kpi_id → upload_id of source fact table (auto-populated from suggestions, user can override)
+  const [kpiSourceMap, setKpiSourceMap] = useState<Record<string, number>>({});
+  // upload_id → filename for badge display
+  const [uploadFilenames, setUploadFilenames] = useState<Record<number, string>>({});
+  const [multiFile, setMultiFile] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
@@ -38,6 +43,17 @@ export default function KpiSelectionPage({ params }: PageProps) {
         setSelected(
           new Set(kpiRes.suggestions.filter((k) => k.relevance_score >= 0.7).map((k) => k.kpi_id))
         );
+        // Build kpi_id → upload_id from suggestion metadata
+        const srcMap: Record<string, number> = {};
+        for (const s of kpiRes.suggestions) {
+          if (s.upload_id != null) srcMap[s.kpi_id] = s.upload_id;
+        }
+        setKpiSourceMap(srcMap);
+        // Build upload_id → filename for badge labels
+        const fnMap: Record<number, string> = {};
+        for (const u of schemaRes.uploads) fnMap[u.upload_id] = u.filename;
+        setUploadFilenames(fnMap);
+        setMultiFile(schemaRes.uploads.length > 1);
         // Collect available columns for formula validation
         const cols = schemaRes.uploads.flatMap((u) => u.columns.map((c) => c.column_name));
         setAvailableCols(cols);
@@ -97,7 +113,7 @@ export default function KpiSelectionPage({ params }: PageProps) {
     setSaving(true);
     setValidation(null);
     try {
-      const res = await api.selectKpis(Number(datasetId), [...selected], validSelectedCustom);
+      const res = await api.selectKpis(Number(datasetId), [...selected], validSelectedCustom, kpiSourceMap);
       router.push(`/dimension-selection/${datasetId}`);
     } catch (e: unknown) {
       // 422 with validation errors
@@ -172,6 +188,7 @@ export default function KpiSelectionPage({ params }: PageProps) {
               kpi={kpi}
               selected={selected.has(kpi.kpi_id)}
               onToggle={toggleKpi}
+              sourceFile={multiFile && kpi.upload_id != null ? uploadFilenames[kpi.upload_id] : undefined}
             />
           ))}
         </div>

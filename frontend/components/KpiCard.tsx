@@ -14,9 +14,10 @@ interface Props {
   kpi: KpiSuggestion;
   selected: boolean;
   onToggle: (kpiId: string) => void;
+  sourceFile?: string;
 }
 
-export default function KpiCard({ kpi, selected, onToggle }: Props) {
+export default function KpiCard({ kpi, selected, onToggle, sourceFile }: Props) {
   const barWidth = Math.round(kpi.relevance_score * 100);
   const domainClass = DOMAIN_COLORS[kpi.domain] ?? "bg-gray-100 text-gray-600";
 
@@ -44,11 +45,16 @@ export default function KpiCard({ kpi, selected, onToggle }: Props) {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-gray-800 text-sm truncate">{kpi.display_name}</span>
             <span className={`shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${domainClass}`}>
               {kpi.domain}
             </span>
+            {sourceFile && (
+              <span className="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200" title={`Source: ${sourceFile}`}>
+                {sourceFile.length > 20 ? sourceFile.slice(0, 20) + "…" : sourceFile}
+              </span>
+            )}
           </div>
           <p className="mt-0.5 font-mono text-xs text-gray-400 truncate">{kpi.formula}</p>
 

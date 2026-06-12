@@ -93,6 +93,7 @@ export const api = {
       to_col: string;
       confirmed: boolean;
     }>,
+    primaryFactUploadId?: number,
   ): Promise<{ dataset_id: number; pipeline_stage: string; data_model: DataModelResponse; validation: ValidationResult }> =>
     request(`/data-model/${datasetId}/confirm`, {
       method: "POST",
@@ -102,6 +103,7 @@ export const api = {
         table_overrides: tableOverrides,
         pk_overrides: pkOverrides,
         fk_overrides: fkOverrides,
+        primary_fact_upload_id: primaryFactUploadId ?? null,
       }),
     }),
 
@@ -162,11 +164,17 @@ export const api = {
     datasetId: number,
     selectedKpiIds: string[],
     customKpis: KpiSpec[],
+    kpiSourceMap?: Record<string, number>,
   ): Promise<{ dataset_id: number; pipeline_stage: string; validation: ValidationResult }> =>
     request("/kpi-suggestions/select", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataset_id: datasetId, selected_kpi_ids: selectedKpiIds, custom_kpis: customKpis }),
+      body: JSON.stringify({
+        dataset_id: datasetId,
+        selected_kpi_ids: selectedKpiIds,
+        custom_kpis: customKpis,
+        kpi_source_map: kpiSourceMap ?? {},
+      }),
     }),
 
   // ── Dimensions ─────────────────────────────────────────────────────────────

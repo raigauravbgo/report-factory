@@ -40,12 +40,13 @@ export default function RecipePage() {
 
   const [config, setConfig] = useState<RecipeConfig | null>(null);
   const [availableCols, setAvailableCols] = useState<string[]>([]);
+  const [uploadFilenames, setUploadFilenames] = useState<Record<number, string>>({});
+  const [isMultiFile, setIsMultiFile] = useState(false);
   const [approved, setApproved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [formulaErrors, setFormulaErrors] = useState<Record<number, boolean>>({});
-  const [kpiWarnings, setKpiWarnings] = useState<{ kpiName: string; column: string; sourceFile: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,27 +55,16 @@ export default function RecipePage() {
       .then(async (r) => {
         setConfig(r.config);
         setApproved(!!r.approved_at);
-        // Load column names for formula validation
         try {
           const schema = await api.getDatasetSchema(r.config.dataset_id);
           const cols = schema.uploads.flatMap((u) => u.columns.map((c) => c.column_name));
           setAvailableCols(cols);
-
-          // Warn if a KPI formula references a column that only exists in a secondary upload
-          const primaryUpload = schema.uploads.find((u) => u.upload_id === r.config.upload_id);
-          const primaryColSet = new Set(primaryUpload?.columns.map((c) => c.column_name) ?? []);
-          const warnings: { kpiName: string; column: string; sourceFile: string }[] = [];
-          for (const kpi of r.config.kpis) {
-            for (const col of extractColsFromFormula(kpi.formula)) {
-              if (!primaryColSet.has(col) && cols.includes(col)) {
-                const src = schema.uploads.find((u) => u.columns.some((c) => c.column_name === col));
-                warnings.push({ kpiName: kpi.name, column: col, sourceFile: src?.filename ?? "another file" });
-              }
-            }
-          }
-          setKpiWarnings(warnings);
+          const fnMap: Record<number, string> = {};
+          for (const u of schema.uploads) fnMap[u.upload_id] = u.filename;
+          setUploadFilenames(fnMap);
+          setIsMultiFile(schema.uploads.length > 1);
         } catch {
-          // Non-fatal: formula validation will still work client-side with empty list
+          // Non-fatal
         }
       })
       .catch((e) => setError(String(e)));
@@ -213,50 +203,48 @@ export default function RecipePage() {
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">KPI definitions</h2>
 
-        {kpiWarnings.length > 0 && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-1.5">
-            <p className="text-sm font-medium text-amber-800">Column mismatch — these KPIs will not appear on the dashboard</p>
-            {kpiWarnings.map((w, i) => (
-              <p key={i} className="text-xs text-amber-700">
-                <span className="font-semibold">{w.kpiName}</span>: column{" "}
-                <code className="rounded bg-amber-100 px-1">{w.column}</code> is in{" "}
-                <span className="font-medium">{w.sourceFile}</span>, not in the primary fact table.
-                Update the formula to use a column from the main file.
-              </p>
-            ))}
-          </div>
-        )}
-
         <div className="space-y-2">
-          {config.kpis.map((kpi, i) => (
-            <div key={i} className="rounded-lg border border-gray-200 bg-white px-4 py-3 grid grid-cols-2 gap-4">
-              <div>
-                <label className="mb-1 block text-xs text-gray-500">Name</label>
-                <input
-                  value={kpi.name}
-                  onChange={(e) => updateKpi(i, "name", e.target.value)}
-                  disabled={approved}
-                  className="w-full rounded border border-gray-200 px-2 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 disabled:bg-gray-50"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-gray-500">Formula</label>
-                {approved ? (
-                  <p className="font-mono text-sm text-gray-700 px-2 py-1.5">{kpi.formula}</p>
-                ) : (
-                  <FormulaInput
-                    value={kpi.formula}
-                    onChange={(v) => updateKpi(i, "formula", v)}
-                    availableColumns={availableCols}
-                    onValidation={(result) =>
-                      setFormulaErrors((prev) => ({ ...prev, [i]: !result.valid }))
-                    }
+          {config.kpis.map((kpi, i) => {
+            const sourceFileName = isMultiFile && kpi.upload_id != null
+              ? uploadFilenames[kpi.upload_id]
+              : undefined;
+            return (
+              <div key={i} className="rounded-lg border border-gray-200 bg-white px-4 py-3 grid grid-cols-2 gap-4">
+                <div>
+                  <div className="mb-1 flex items-center gap-2">
+                    <label className="text-xs text-gray-500">Name</label>
+                    {sourceFileName && (
+                      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200" title={`Source: ${sourceFileName}`}>
+                        {sourceFileName.length > 22 ? sourceFileName.slice(0, 22) + "…" : sourceFileName}
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    value={kpi.name}
+                    onChange={(e) => updateKpi(i, "name", e.target.value)}
                     disabled={approved}
+                    className="w-full rounded border border-gray-200 px-2 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 disabled:bg-gray-50"
                   />
-                )}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-gray-500">Formula</label>
+                  {approved ? (
+                    <p className="font-mono text-sm text-gray-700 px-2 py-1.5">{kpi.formula}</p>
+                  ) : (
+                    <FormulaInput
+                      value={kpi.formula}
+                      onChange={(v) => updateKpi(i, "formula", v)}
+                      availableColumns={availableCols}
+                      onValidation={(result) =>
+                        setFormulaErrors((prev) => ({ ...prev, [i]: !result.valid }))
+                      }
+                      disabled={approved}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
