@@ -15,6 +15,8 @@ STEP_LABELS = [
 class KpiSpec(BaseModel):
     name: str
     formula: str
+    upload_id: int | None = None  # source fact table; None = primary fact
+    resolved_formula: str | None = None  # column-resolved formula; overrides formula at eval time
 
 
 class InterviewResult(BaseModel):
@@ -155,6 +157,7 @@ class ConfirmDataModelRequest(BaseModel):
     table_overrides: list[TableRoleOverride] = []
     pk_overrides: dict[str, list[str]] = {}  # upload_id (as str) → [col_name]
     fk_overrides: list[ForeignKeyOverride] = []
+    primary_fact_upload_id: int | None = None  # user-selected primary fact table
 
 
 class DataModelTableEntry(BaseModel):
@@ -163,6 +166,7 @@ class DataModelTableEntry(BaseModel):
     role: str
     confidence: float
     confirmed_role: str | None
+    is_primary_fact: bool = False  # user-confirmed primary fact table for the dashboard
 
 
 class DataModelFkEntry(BaseModel):
@@ -173,6 +177,17 @@ class DataModelFkEntry(BaseModel):
     confidence: float
     integrity_pct: float | None
     confirmed: bool
+    # A1: join cardinality fields (populated by data_modeler, None for legacy FKs)
+    join_type: str | None = None
+    dim_max_dup: int | None = None
+    dim_unique_ratio: float | None = None
+
+
+class BridgeDim(BaseModel):
+    dim_upload_id: int
+    dim_filename: str
+    fact_upload_ids: list[int]
+    fact_filenames: list[str]
 
 
 class DataModelResponse(BaseModel):
@@ -183,6 +198,7 @@ class DataModelResponse(BaseModel):
     primary_keys: dict[str, list[str]]
     foreign_keys: list[DataModelFkEntry]
     ai_reasoning: str | None
+    bridge_dims: list[BridgeDim] = []  # dim tables bridging 2+ fact tables
     validation: "ValidationResult | None" = None
 
     model_config = {"from_attributes": True}
@@ -197,12 +213,14 @@ class KpiSuggestion(BaseModel):
     formula: str
     relevance_score: float
     reasoning: str
+    upload_id: int | None = None  # source upload that best matched this KPI
 
 
 class KpiSelectionRequest(BaseModel):
     dataset_id: int
     selected_kpi_ids: list[str]
     custom_kpis: list[KpiSpec] = []
+    kpi_source_map: dict[str, int] = {}  # kpi_id → upload_id of source fact table
 
 
 # ── Dimension suggestions ─────────────────────────────────────────────────────

@@ -35,6 +35,13 @@ def suggest(dataset_id: int, db: "Session", use_ai: bool = True) -> list[dict]:
     all_cols = db.query(ColumnSchema).filter(ColumnSchema.upload_id.in_(upload_ids)).all()
     col_names = [c.column_name for c in all_cols]
 
+    # Build column → upload_id mapping so we can tag each KPI with its source fact
+    col_to_upload: dict[str, int] = {c.column_name: c.upload_id for c in all_cols}
+    # Group columns by upload for per-upload scoring
+    upload_col_map: dict[int, list[str]] = {}
+    for c in all_cols:
+        upload_col_map.setdefault(c.upload_id, []).append(c.column_name)
+
     detected_domain = _infer_domain(col_names)
 
     catalog = _load_catalog()
@@ -52,6 +59,8 @@ def suggest(dataset_id: int, db: "Session", use_ai: bool = True) -> list[dict]:
                 reasoning = f"Relevant for {detected_domain} datasets."
             else:
                 reasoning = "Potential match based on domain."
+            # Find which upload best covers this KPI's source fields
+            best_upload_id = _best_upload_for_kpi(kpi, upload_col_map)
             scored.append(
                 {
                     "kpi_id": kpi["kpi_id"],
@@ -60,6 +69,7 @@ def suggest(dataset_id: int, db: "Session", use_ai: bool = True) -> list[dict]:
                     "formula": _build_formula(kpi),
                     "relevance_score": round(effective_score, 3),
                     "reasoning": reasoning,
+                    "upload_id": best_upload_id,
                 }
             )
 
@@ -69,6 +79,11 @@ def suggest(dataset_id: int, db: "Session", use_ai: bool = True) -> list[dict]:
     if use_ai and top:
         try:
             top = _ai_rerank(top, col_names, detected_domain)
+            # Restore upload_id after AI rerank (AI response won't include it)
+            uid_map = {s["kpi_id"]: s.get("upload_id") for s in scored}
+            for s in top:
+                if s.get("upload_id") is None:
+                    s["upload_id"] = uid_map.get(s["kpi_id"])
         except Exception as exc:
             logger.warning("AI KPI re-ranking failed (%s) — using score-based order.", exc)
 
@@ -162,6 +177,72 @@ def _build_formula(kpi: dict) -> str:
     if den == "_none_" or not den:
         return num
     return f"{num} / {den}"
+
+
+def _best_upload_for_kpi(kpi: dict, upload_col_map: dict[int, list[str]]) -> int | None:
+    """Return the upload_id whose columns best cover this KPI's source_fields."""
+    source_fields = kpi.get("source_fields", [])
+    if not source_fields or not upload_col_map:
+        return None
+    best_uid, best_score = None, -1
+    for uid, cols in upload_col_map.items():
+        score = _count_matches({"source_fields": source_fields}, cols)
+        if score > best_score:
+            best_score, best_uid = score, uid
+    return best_uid if best_score > 0 else None
+
+
+def resolve_kpi_formula(kpi: dict, col_names: list[str]) -> str | None:
+    """Map catalog field names in a KPI entry to actual column names in the dataset.
+
+    Returns a resolved formula string (e.g. 'mean(rubric_score)') or None if the
+    primary source field cannot be matched to any available column.
+    D1: called at /kpi-suggestions/select time so recipes store column-resolved formulas.
+    """
+    num_field = kpi.get("numerator", "")
+    den_field = kpi.get("denominator", "_none_")
+
+    resolved_num = _find_best_col_match(num_field, col_names)
+    if not resolved_num:
+        return None
+
+    if den_field == "_none_" or not den_field:
+        return f"mean({resolved_num})"
+
+    resolved_den = _find_best_col_match(den_field, col_names)
+    if not resolved_den:
+        return None
+
+    return f"mean({resolved_num}) / mean({resolved_den})"
+
+
+def _find_best_col_match(field: str, col_names: list[str]) -> str | None:
+    """Return the actual column name that best matches a catalog field name."""
+    if not field or not col_names:
+        return None
+
+    nf = _normalise(field)
+    norm_cols = [(_normalise(c), c) for c in col_names]
+
+    # Exact match
+    for nc, col in norm_cols:
+        if nc == nf:
+            return col
+
+    # Substring match (field inside column or column inside field, min 3 chars)
+    for nc, col in norm_cols:
+        if len(nf) >= 3 and len(nc) >= 3 and (nf in nc or nc in nf):
+            return col
+
+    # Token overlap (shared meaningful token ≥ 4 chars)
+    field_tokens = {t for t in nf.split("_") if len(t) >= 4}
+    if field_tokens:
+        for nc, col in norm_cols:
+            col_tokens = {t for t in nc.split("_") if len(t) >= 4}
+            if field_tokens & col_tokens:
+                return col
+
+    return None
 
 
 def _ai_rerank(top_kpis: list[dict], col_names: list[str], detected_domain: str | None) -> list[dict]:

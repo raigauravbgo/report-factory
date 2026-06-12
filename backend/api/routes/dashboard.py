@@ -227,12 +227,83 @@ def _assess_data_quality(df: pd.DataFrame, date_col: str) -> dict:
     }
 
 
-def _load_joined_df(config: RecipeConfig, db: Session, engine) -> pd.DataFrame:
-    """Load the fact staging table and LEFT JOIN dimension tables via confirmed FK relationships."""
+def _formula_needs_col(formula: str) -> "str | None":
+    """Return the primary column a formula references (used for fallback df lookup)."""
+    import re as _re
+    f = formula.strip()
+    m = _re.match(r'^(?:mean|avg|average|sum|count|median|max|min)\(([^)]+)\)$', f, _re.I)
+    if m:
+        return m.group(1).strip()
+    if '/' in f:
+        for part in f.split('/', 1):
+            m2 = _re.match(r'^(?:mean|avg|sum|count|median|max|min)\(([^)]+)\)$', part.strip(), _re.I)
+            if m2:
+                return m2.group(1).strip()
+    if _re.match(r'^[a-zA-Z_]\w*$', f):
+        return f
+    return None
+
+
+def _safe_to_merge(
+    fact_df: "pd.DataFrame",
+    fact_col: str,
+    dim_df: "pd.DataFrame",
+    dim_col: str,
+    max_rows: int,
+    dim_uid: int,
+    stored_max_dup: "int | None" = None,
+) -> bool:
+    """Return True only if the LEFT JOIN is estimated to produce ≤ max_rows rows.
+
+    E5: uses stored_max_dup from the FK dict when available (avoids recomputing
+    value_counts on every dashboard load). Falls back to live computation for
+    legacy FK records that predate the join_type field.
+    """
+    if fact_col not in fact_df.columns or dim_col not in dim_df.columns:
+        return True  # columns missing — merge will produce 0 matches, no explosion
+    if stored_max_dup is not None:
+        max_dim_per_key = stored_max_dup
+    else:
+        dim_counts = dim_df[dim_col].value_counts()
+        max_dim_per_key = int(dim_counts.max()) if len(dim_counts) else 1
+    if max_dim_per_key <= 1:
+        return True  # clean 1:1 or 1:many dim — safe
+    estimated = len(fact_df) * max_dim_per_key
+    if estimated > max_rows:
+        logger.warning(
+            "Pre-merge estimate: ~%d rows (dim upload %d has up to %d copies of a single key) "
+            "exceeds limit %d — skipping FK join.",
+            estimated, dim_uid, max_dim_per_key, max_rows,
+        )
+        return False
+    return True
+
+
+def _pre_aggregate_dim(dim_df: "pd.DataFrame", key_col: str, drop_cols: list) -> "pd.DataFrame":
+    """Deduplicate a many-to-many dimension table to one row per key.
+
+    A2: used when join_type == 'many_to_many' to prevent row duplication while
+    still enriching the fact with dimension attributes (department, location, etc.).
+    Takes the first occurrence per key — sufficient for categorical enrichment.
+    """
+    cols_to_keep = [c for c in dim_df.columns if c not in drop_cols]
+    return (
+        dim_df[cols_to_keep]
+        .drop_duplicates(subset=[key_col], keep="first")
+        .reset_index(drop=True)
+    )
+
+
+def _load_joined_df(config: RecipeConfig, db: Session, engine, fact_uid_override: int | None = None) -> pd.DataFrame:
+    """Load a fact staging table and LEFT JOIN dimension tables via confirmed FK relationships.
+
+    ``fact_uid_override`` lets callers load a secondary fact table (e.g. for a KPI whose
+    source is a different file than the primary fact) while still applying all FK joins.
+    """
     from sqlalchemy import inspect as sa_inspect
     from models.data_model import DataModel
 
-    fact_uid = config.upload_id
+    fact_uid = fact_uid_override if fact_uid_override is not None else config.upload_id
     all_uids: list[int] = list(config.upload_ids) if config.upload_ids else [fact_uid]
 
     # Load all available staging tables
@@ -261,7 +332,16 @@ def _load_joined_df(config: RecipeConfig, db: Session, engine) -> pd.DataFrame:
     if not dm or not dm.foreign_keys:
         return result
 
+    # Determine which uploads are dimensions vs facts — only join dims to the fact table
+    dim_uids: set[int] = set()
+    if dm.tables:
+        for t in dm.tables:
+            role = t.get("confirmed_role") or t.get("role")
+            if role == "dimension":
+                dim_uids.add(t["upload_id"])
+
     joined_uids: set[int] = {fact_uid}
+    _MAX_JOIN_ROWS = 500_000
     for fk in dm.foreign_keys:
         if not fk.get("confirmed", True):
             continue
@@ -270,46 +350,106 @@ def _load_joined_df(config: RecipeConfig, db: Session, engine) -> pd.DataFrame:
         to_uid: int = fk["to_upload_id"]
         from_col: str = fk["from_col"]
         to_col: str = fk["to_col"]
+        # A1/E5: use stored join_type and dim_max_dup when present (avoids recomputing)
+        join_type: str = fk.get("join_type", "unverified")
+        stored_max_dup: "int | None" = fk.get("dim_max_dup")
 
-        # Only join dimension tables that haven't been joined yet
-        _MAX_JOIN_ROWS = 500_000
-        if from_uid == fact_uid and to_uid in frames and to_uid not in joined_uids:
+        # Only join DIMENSION tables to the fact table — skip fact-to-fact FKs.
+        # IMPORTANT: only add to joined_uids when the merge actually succeeds so that a
+        # safe FK (e.g. agent_email→email) can still fire after an unsafe one
+        # (e.g. department→department) was blocked by _safe_to_merge.
+        if from_uid == fact_uid and to_uid in dim_uids and to_uid in frames and to_uid not in joined_uids:
             dim_df = frames[to_uid]
-            # Drop columns already present in result (except the join key)
             drop_cols = [c for c in dim_df.columns if c in result.columns and c != to_col]
-            merged = result.merge(
-                dim_df.drop(columns=drop_cols),
-                left_on=from_col,
-                right_on=to_col,
-                how="left",
-                suffixes=("", f"_{to_uid}"),
-            )
-            if len(merged) > _MAX_JOIN_ROWS:
-                logger.warning(
-                    "FK join produced %d rows (limit %d) for upload %d — skipping join.",
-                    len(merged), _MAX_JOIN_ROWS, to_uid,
+            if join_type == "many_to_many":
+                # A2: pre-aggregate dim to avoid row duplication — take first value per key
+                agg_dim = _pre_aggregate_dim(dim_df, to_col, drop_cols)
+                result = result.merge(
+                    agg_dim,
+                    left_on=from_col,
+                    right_on=to_col,
+                    how="left",
+                    suffixes=("", f"_{to_uid}"),
                 )
-            else:
-                result = merged
-            joined_uids.add(to_uid)
-        elif to_uid == fact_uid and from_uid in frames and from_uid not in joined_uids:
+                joined_uids.add(to_uid)
+            elif _safe_to_merge(result, from_col, dim_df, to_col, _MAX_JOIN_ROWS, to_uid, stored_max_dup):
+                result = result.merge(
+                    dim_df.drop(columns=drop_cols),
+                    left_on=from_col,
+                    right_on=to_col,
+                    how="left",
+                    suffixes=("", f"_{to_uid}"),
+                )
+                joined_uids.add(to_uid)
+        elif to_uid == fact_uid and from_uid in dim_uids and from_uid in frames and from_uid not in joined_uids:
             dim_df = frames[from_uid]
             drop_cols = [c for c in dim_df.columns if c in result.columns and c != from_col]
-            merged = result.merge(
-                dim_df.drop(columns=drop_cols),
-                left_on=to_col,
-                right_on=from_col,
-                how="left",
-                suffixes=("", f"_{from_uid}"),
-            )
-            if len(merged) > _MAX_JOIN_ROWS:
-                logger.warning(
-                    "FK join produced %d rows (limit %d) for upload %d — skipping join.",
-                    len(merged), _MAX_JOIN_ROWS, from_uid,
+            if join_type == "many_to_many":
+                # A2: pre-aggregate dim to avoid row duplication
+                agg_dim = _pre_aggregate_dim(dim_df, from_col, drop_cols)
+                result = result.merge(
+                    agg_dim,
+                    left_on=to_col,
+                    right_on=from_col,
+                    how="left",
+                    suffixes=("", f"_{from_uid}"),
                 )
-            else:
-                result = merged
-            joined_uids.add(from_uid)
+                joined_uids.add(from_uid)
+            elif _safe_to_merge(result, to_col, dim_df, from_col, _MAX_JOIN_ROWS, from_uid, stored_max_dup):
+                result = result.merge(
+                    dim_df.drop(columns=drop_cols),
+                    left_on=to_col,
+                    right_on=from_col,
+                    how="left",
+                    suffixes=("", f"_{from_uid}"),
+                )
+                joined_uids.add(from_uid)
+
+    # RC3: Inherited dimension joins for secondary fact tables.
+    # When fact_uid_override is set (secondary fact load), FKs in the data model may only
+    # record primary_fact → dimension, not secondary_fact → dimension. If the secondary fact
+    # shares the same join-key column name, we can still attach the dimension.
+    if fact_uid_override is not None:
+        unjoined_dims = dim_uids - joined_uids
+        for fk in (dm.foreign_keys if dm else []):
+            if not unjoined_dims:
+                break
+            if not fk.get("confirmed", True):
+                continue
+            f_from_uid: int = fk["from_upload_id"]
+            f_to_uid: int = fk["to_upload_id"]
+            f_from_col: str = fk["from_col"]
+            f_to_col: str = fk["to_col"]
+            fk_join_type: str = fk.get("join_type", "unverified")
+            fk_stored_dup: "int | None" = fk.get("dim_max_dup")
+
+            # FK points to an unjoined dim and the fact-side key exists in our result
+            if f_to_uid in unjoined_dims and f_to_uid in frames and f_from_col in result.columns:
+                dim_df = frames[f_to_uid]
+                drop_cols = [c for c in dim_df.columns if c in result.columns and c != f_to_col]
+                if fk_join_type == "many_to_many":
+                    agg_dim = _pre_aggregate_dim(dim_df, f_to_col, drop_cols)
+                    result = result.merge(agg_dim, left_on=f_from_col, right_on=f_to_col, how="left", suffixes=("", f"_{f_to_uid}"))
+                    joined_uids.add(f_to_uid)
+                    unjoined_dims.discard(f_to_uid)
+                elif _safe_to_merge(result, f_from_col, dim_df, f_to_col, _MAX_JOIN_ROWS, f_to_uid, fk_stored_dup):
+                    result = result.merge(dim_df.drop(columns=drop_cols), left_on=f_from_col, right_on=f_to_col, how="left", suffixes=("", f"_{f_to_uid}"))
+                    joined_uids.add(f_to_uid)
+                    unjoined_dims.discard(f_to_uid)
+
+            # Reverse: FK from dim to some table, and the dim-side key exists in our result
+            elif f_from_uid in unjoined_dims and f_from_uid in frames and f_to_col in result.columns:
+                dim_df = frames[f_from_uid]
+                drop_cols = [c for c in dim_df.columns if c in result.columns and c != f_from_col]
+                if fk_join_type == "many_to_many":
+                    agg_dim = _pre_aggregate_dim(dim_df, f_from_col, drop_cols)
+                    result = result.merge(agg_dim, left_on=f_to_col, right_on=f_from_col, how="left", suffixes=("", f"_{f_from_uid}"))
+                    joined_uids.add(f_from_uid)
+                    unjoined_dims.discard(f_from_uid)
+                elif _safe_to_merge(result, f_to_col, dim_df, f_from_col, _MAX_JOIN_ROWS, f_from_uid, fk_stored_dup):
+                    result = result.merge(dim_df.drop(columns=drop_cols), left_on=f_to_col, right_on=f_from_col, how="left", suffixes=("", f"_{f_from_uid}"))
+                    joined_uids.add(f_from_uid)
+                    unjoined_dims.discard(f_from_uid)
 
     return result
 
@@ -397,28 +537,130 @@ def get_dashboard_data(
         df["__period__"] = df["__date__"].dt.to_period(freq).astype(str)
         has_dates = bool(df["__date__"].notna().any())
 
+    # Partition KPIs into primary (evaluated on main df) and alt (need their own source df)
+    primary_fact_uid = config.upload_id
+    alt_kpis = [k for k in config.kpis if k.upload_id and k.upload_id != primary_fact_uid]
+
+    # All other upload IDs in this recipe that aren't the primary fact
+    other_uids: list[int] = [uid for uid in (config.upload_ids or []) if uid != primary_fact_uid]
+
+    def _load_alt_df(uid: int) -> "pd.DataFrame":
+        """Load, date-parse, and return the staged df for a secondary fact upload."""
+        try:
+            from models.column_schema import ColumnSchema
+            adf = _load_joined_df(config, db, engine, fact_uid_override=uid)
+            if adf.empty:
+                return adf
+            # Prefer the recipe's date column when present; otherwise find this upload's own date column
+            alt_date_col = date_col if (date_col and date_col in adf.columns) else None
+            if not alt_date_col:
+                schema_date = (
+                    db.query(ColumnSchema.column_name)
+                    .filter(ColumnSchema.upload_id == uid)
+                    .filter(
+                        (ColumnSchema.confirmed_role == "date")
+                        | ((ColumnSchema.confirmed_role.is_(None)) & (ColumnSchema.ai_role == "date"))
+                    )
+                    .first()
+                )
+                if schema_date:
+                    alt_date_col = schema_date[0]
+            if alt_date_col and alt_date_col in adf.columns:
+                adf["__date__"] = pd.to_datetime(adf[alt_date_col], errors="coerce")
+            else:
+                adf["__date__"] = pd.Series(pd.NaT, index=adf.index, dtype="datetime64[ns]")
+            if not adf["__date__"].isna().all():
+                adf["__date__"] = adf["__date__"].clip(
+                    lower=pd.Timestamp("1900-01-01"), upper=pd.Timestamp("2100-12-31")
+                )
+                freq = _GRANULARITY_FREQ.get(config.granularity or "monthly", "M")
+                adf["__period__"] = adf["__date__"].dt.to_period(freq).astype(str)
+            return adf
+        except Exception as exc:
+            logger.warning("Could not load alt fact table for upload %d: %s", uid, exc)
+            return pd.DataFrame()
+
+    # Build alt DFs: first for KPIs with explicit upload_id, then preload all other uploads
+    # (preloading enables backward-compat fallback for old recipes where upload_id is None)
+    alt_dfs: dict[int, pd.DataFrame] = {}
+    uids_to_load = list({k.upload_id for k in alt_kpis if k.upload_id} | set(other_uids))
+    for uid in uids_to_load:
+        if uid not in alt_dfs:
+            alt_dfs[uid] = _load_alt_df(uid)
+
+    # RC4: augment filter_options with values from alt fact DataFrames (unfiltered) so the
+    # filter dropdown shows all possible values across every fact table in the dataset.
+    for _adf in alt_dfs.values():
+        if _adf.empty:
+            continue
+        for col in filter_cols:
+            if col in _adf.columns:
+                existing = set(filter_options.get(col, []))
+                new_vals = {str(v) for v in _adf[col].dropna().unique()}
+                filter_options[col] = sorted(existing | new_vals)[:100]
+
+    # RC1: apply the same active filters to every alt DataFrame so secondary-fact KPIs
+    # honour the dashboard filter selection (previously only df/primary was filtered).
+    for uid in list(alt_dfs.keys()):
+        _adf = alt_dfs[uid]
+        if _adf.empty:
+            continue
+        for col, val in active_filters.items():
+            if col in _adf.columns:
+                _adf = _adf[_adf[col].astype(str) == val]
+        alt_dfs[uid] = _adf
+
+    def _df_for_kpi(kpi) -> "pd.DataFrame":
+        # New recipes: explicit source mapping wins
+        if kpi.upload_id and kpi.upload_id != primary_fact_uid:
+            return alt_dfs.get(kpi.upload_id, pd.DataFrame())
+        # Old recipes (upload_id is None): try primary first, fall back by column presence
+        needed = _formula_needs_col(kpi.formula)
+        if needed and needed not in df.columns:
+            for uid in other_uids:
+                cdf = alt_dfs.get(uid, pd.DataFrame())
+                if not cdf.empty and needed in cdf.columns:
+                    logger.info("KPI '%s': column '%s' not in primary fact — using upload %d as source.", kpi.name, needed, uid)
+                    return cdf
+        return df
+
     # KPI summaries
     kpi_summaries = []
     for kpi in config.kpis:
-        series = _eval_kpi(df, kpi.formula)
+        kdf = _df_for_kpi(kpi)
+        if kdf.empty:
+            continue
+        # D1: prefer resolved_formula (column-level) over catalog formula (field-name-level)
+        eval_formula = kpi.resolved_formula or kpi.formula
+        series = _eval_kpi(kdf, eval_formula)
         if series is not None and series.notna().any():
+            total = len(series)
+            valid_count = int(series.notna().sum())
+            null_count = total - valid_count
+            # E2: surface null rate so the UI can warn users about data quality
             kpi_summaries.append({
                 "name": kpi.name,
                 "formula": kpi.formula,
                 "value": round(float(series.mean()), 2),
-                "count": int(series.notna().sum()),
+                "count": valid_count,
+                "null_count": null_count,
+                "null_pct": round(null_count / total * 100, 1) if total > 0 else 0.0,
             })
 
     # Time-series
     time_series: dict = {}
     if has_dates:
         for kpi in config.kpis:
-            series = _eval_kpi(df, kpi.formula)
+            kdf = _df_for_kpi(kpi)
+            if kdf.empty or "__period__" not in kdf.columns:
+                continue
+            series = _eval_kpi(kdf, kpi.resolved_formula or kpi.formula)
             if series is None or not series.notna().any():
                 continue
-            df["__val__"] = series
+            kdf = kdf.copy()
+            kdf["__val__"] = series
             grouped = (
-                df.groupby("__period__")["__val__"]
+                kdf.groupby("__period__")["__val__"]
                 .mean()
                 .reset_index()
                 .sort_values("__period__")
@@ -427,21 +669,27 @@ def get_dashboard_data(
                 {"period": str(row["__period__"]), "value": round(float(row["__val__"]) if pd.notna(row["__val__"]) else 0.0, 2)}
                 for _, row in grouped.iterrows()
             ]
-            df.drop(columns=["__val__"], inplace=True, errors="ignore")
 
     # Dimension breakdowns
     dimension_breakdowns: dict = {}
     for dim in (config.dimensions or [])[:3]:
-        if dim not in df.columns:
+        # RC2: dimension may only be present in a secondary fact's joined DataFrame,
+        # so check all available DataFrames — not just the primary fact df.
+        dim_in_any = dim in df.columns or any(dim in adf.columns for adf in alt_dfs.values() if not adf.empty)
+        if not dim_in_any:
             continue
         dimension_breakdowns[dim] = {}
         for kpi in config.kpis[:2]:
-            series = _eval_kpi(df, kpi.formula)
+            kdf = _df_for_kpi(kpi)
+            if kdf.empty or dim not in kdf.columns:
+                continue
+            series = _eval_kpi(kdf, kpi.resolved_formula or kpi.formula)
             if series is None or not series.notna().any():
                 continue
-            df["__val__"] = series
+            kdf = kdf.copy()
+            kdf["__val__"] = series
             grouped = (
-                df.groupby(dim)["__val__"]
+                kdf.groupby(dim)["__val__"]
                 .mean()
                 .reset_index()
                 .sort_values("__val__", ascending=False)
@@ -451,7 +699,6 @@ def get_dashboard_data(
                 {"name": str(row[dim]), "value": round(float(row["__val__"]) if pd.notna(row["__val__"]) else 0.0, 2)}
                 for _, row in grouped.iterrows()
             ]
-            df.drop(columns=["__val__"], inplace=True, errors="ignore")
 
     metrics = _build_metrics(kpi_summaries, time_series)
     insights = _generate_insights(metrics, dimension_breakdowns)

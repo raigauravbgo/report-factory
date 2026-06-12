@@ -79,16 +79,24 @@ def generate_from_context(dataset_id: int, db: "Session") -> RecipeConfig:
     upload_ids = [u.id for u in uploads]
     fact_upload_id = upload_ids[0] if upload_ids else 0
 
-    # Determine fact upload from data model
+    # Determine primary fact upload from data model using is_primary_fact flag
     dm = db.query(DataModel).filter(DataModel.dataset_id == dataset_id).first()
     dim_upload_ids: list[int] = []
     if dm and dm.tables:
+        primary_fact: dict | None = None
+        first_fact: dict | None = None
         for t in dm.tables:
             role = t.get("confirmed_role") or t.get("role")
-            if role == "fact" and fact_upload_id == upload_ids[0]:
-                fact_upload_id = t["upload_id"]
+            if role == "fact":
+                if first_fact is None:
+                    first_fact = t
+                if t.get("is_primary_fact"):
+                    primary_fact = t
             elif role == "dimension":
                 dim_upload_ids.append(t["upload_id"])
+        chosen = primary_fact or first_fact
+        if chosen:
+            fact_upload_id = chosen["upload_id"]
 
     # Find date column from fact table
     fact_cols = (
@@ -115,9 +123,11 @@ def generate_from_context(dataset_id: int, db: "Session") -> RecipeConfig:
     ]
     selected_kpi_ids: list[str] = context.get("selected_kpi_ids", [])
     custom_kpis_raw: list[dict] = context.get("custom_kpis", [])
+    kpi_source_map: dict[str, int] = context.get("kpi_source_map", {})
 
     # Build KpiSpec list from catalog selections
     catalog = {k["kpi_id"]: k for k in get_kpi_catalog()}
+    resolved_formulas: dict[str, str] = context.get("resolved_kpi_formulas", {})
     kpis: list[KpiSpec] = []
     for kpi_id in selected_kpi_ids:
         if kpi_id in catalog:
@@ -125,10 +135,19 @@ def generate_from_context(dataset_id: int, db: "Session") -> RecipeConfig:
             num = k.get("numerator", kpi_id)
             den = k.get("denominator", "_none_")
             formula = num if den == "_none_" or not den else f"{num} / {den}"
-            kpis.append(KpiSpec(name=k["display_name"], formula=formula))
-    # Add custom KPIs
+            source_uid = kpi_source_map.get(kpi_id)
+            # D1: use resolved_formula (column-level) if available; keep catalog formula for audit
+            resolved = resolved_formulas.get(kpi_id)
+            kpis.append(KpiSpec(
+                name=k["display_name"],
+                formula=formula,
+                upload_id=source_uid,
+                resolved_formula=resolved,
+            ))
+    # Add custom KPIs — carry upload_id if stored in context
     for ck in custom_kpis_raw:
-        kpis.append(KpiSpec(name=ck["name"], formula=ck["formula"]))
+        source_uid = kpi_source_map.get(ck.get("name", "")) or ck.get("upload_id")
+        kpis.append(KpiSpec(name=ck["name"], formula=ck["formula"], upload_id=source_uid))
 
     # Column mappings: only the columns actually used in the recipe
     _AGG_FUNCS = {"mean", "avg", "average", "sum", "count", "median", "max", "min"}

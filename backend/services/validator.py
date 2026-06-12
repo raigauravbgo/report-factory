@@ -214,6 +214,28 @@ def validate_data_model(dataset_id: int, db: "Session") -> ValidationResult:
                 )
             )
 
+    # A4: many-to-many join warning — these joins inflate row counts at dashboard time
+    for fk in fks:
+        if not fk.get("confirmed", True):
+            continue
+        if fk.get("join_type") == "many_to_many":
+            dim_max = fk.get("dim_max_dup")
+            dim_ratio = fk.get("dim_unique_ratio")
+            detail = ""
+            if dim_max is not None:
+                detail = f" The referenced column has up to {dim_max} duplicate key values."
+            errors.append(
+                ValidationError(
+                    field=f"{fk['from_upload_id']}.{fk['from_col']}",
+                    message=(
+                        f"Join '{fk['from_col']}' → '{fk['to_col']}' is many-to-many "
+                        f"(dim key uniqueness: {int((dim_ratio or 0) * 100)}%).{detail} "
+                        "KPI aggregations use pre-aggregated dimension values to avoid row duplication."
+                    ),
+                    severity="warning",
+                )
+            )
+
     # All warnings — never blocks
     return ValidationResult(valid=True, errors=errors)
 

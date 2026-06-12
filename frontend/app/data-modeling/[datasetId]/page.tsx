@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import ValidationPanel from "@/components/ValidationPanel";
 import { api } from "@/lib/api";
 import type {
+  BridgeDim,
   DataModelFkEntry,
   DataModelResponse,
   ValidationResult,
@@ -28,6 +29,7 @@ export default function DataModelingPage({ params }: PageProps) {
   const [model, setModel] = useState<DataModelResponse | null>(null);
   const [tableRoles, setTableRoles] = useState<Record<number, "fact" | "dimension">>({});
   const [pkOverrides, setPkOverrides] = useState<Record<string, string>>({});
+  const [primaryFactUid, setPrimaryFactUid] = useState<number | null>(null);
   const [removedFks, setRemovedFks] = useState<Set<string>>(new Set());
   const [addedFks, setAddedFks] = useState<DataModelFkEntry[]>([]);
   const [draft, setDraft] = useState<FkDraft | null>(null);
@@ -80,6 +82,13 @@ export default function DataModelingPage({ params }: PageProps) {
         }
         setPkOverrides(pks);
         if (data.validation) setValidation(data.validation);
+        // Initialise primary fact from model
+        const primaryTable = data.tables.find((t) => t.is_primary_fact);
+        if (primaryTable) setPrimaryFactUid(primaryTable.upload_id);
+        else {
+          const firstFact = data.tables.find((t) => (t.confirmed_role ?? t.role) === "fact");
+          if (firstFact) setPrimaryFactUid(firstFact.upload_id);
+        }
 
         const cols: Record<number, string[]> = {};
         for (const upload of schema.uploads) {
@@ -142,7 +151,7 @@ export default function DataModelingPage({ params }: PageProps) {
         ...addedFks.map((fk) => ({ ...fk, confirmed: true })),
       ];
 
-      const res = await api.confirmDataModel(Number(datasetId), tableOverrides, pkForAPI, fkOverrides);
+      const res = await api.confirmDataModel(Number(datasetId), tableOverrides, pkForAPI, fkOverrides, primaryFactUid ?? undefined);
       if (res.validation?.errors?.some((e: { severity: string }) => e.severity === "error")) {
         setValidation(res.validation);
         setSaving(false);
@@ -185,6 +194,27 @@ export default function DataModelingPage({ params }: PageProps) {
 
       {validation && <ValidationPanel validation={validation} className="mb-6" />}
 
+      {/* Bridge dim notice */}
+      {(model.bridge_dims ?? []).length > 0 && (
+        <div className="mb-6 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3">
+          <p className="text-sm font-medium text-teal-800">Multi-fact schema detected</p>
+          <p className="mt-1 text-xs text-teal-700">
+            The following dimension table(s) are shared by multiple fact tables. Select which fact table
+            is the <strong>primary fact</strong> — KPIs sourced from a secondary fact will still load
+            from their own table on the dashboard.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {(model.bridge_dims ?? []).map((b: BridgeDim) => (
+              <li key={b.dim_upload_id} className="text-xs text-teal-700">
+                <span className="font-mono font-medium">{b.dim_filename}</span>
+                {" bridges "}
+                {b.fact_filenames.join(" + ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Tables */}
       <section className="mb-8">
         <h2 className="mb-3 text-base font-semibold text-gray-700">Tables</h2>
@@ -193,21 +223,29 @@ export default function DataModelingPage({ params }: PageProps) {
             const role = tableRoles[t.upload_id] ?? t.role;
             const cols = colsByUpload[t.upload_id] ?? [];
             const currentPk = pkOverrides[String(t.upload_id)] ?? "";
+            const isPrimary = primaryFactUid === t.upload_id;
             return (
               <div
                 key={t.upload_id}
                 className={[
                   "rounded-lg border px-4 py-3 space-y-3",
-                  role === "fact" ? "border-orange-200 bg-orange-50" : "border-indigo-200 bg-indigo-50",
+                  role === "fact"
+                    ? isPrimary
+                      ? "border-orange-400 bg-orange-50 ring-1 ring-orange-300"
+                      : "border-orange-200 bg-orange-50"
+                    : "border-indigo-200 bg-indigo-50",
                 ].join(" ")}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-gray-800 truncate mr-2">{t.filename}</span>
                   <select
                     value={role}
-                    onChange={(e) =>
-                      setTableRoles((prev) => ({ ...prev, [t.upload_id]: e.target.value as "fact" | "dimension" }))
-                    }
+                    onChange={(e) => {
+                      const newRole = e.target.value as "fact" | "dimension";
+                      setTableRoles((prev) => ({ ...prev, [t.upload_id]: newRole }));
+                      // If demoting primary fact, auto-select the next fact
+                      if (newRole !== "fact" && isPrimary) setPrimaryFactUid(null);
+                    }}
                     className="shrink-0 rounded border border-gray-200 bg-white px-2 py-1 text-xs"
                   >
                     <option value="fact">Fact</option>
@@ -216,6 +254,21 @@ export default function DataModelingPage({ params }: PageProps) {
                 </div>
 
                 <p className="text-xs text-gray-400">Confidence: {(t.confidence * 100).toFixed(0)}%</p>
+
+                {role === "fact" && (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="primary_fact"
+                      checked={isPrimary}
+                      onChange={() => setPrimaryFactUid(t.upload_id)}
+                      className="accent-orange-500"
+                    />
+                    <span className="text-xs text-gray-600 font-medium">
+                      {isPrimary ? "Primary fact (dashboard default)" : "Set as primary fact"}
+                    </span>
+                  </label>
+                )}
 
                 <div className="flex items-center gap-2">
                   <label className="shrink-0 text-xs font-medium text-gray-600">Primary key</label>
@@ -424,6 +477,20 @@ function FkRow({ fk, fromFile, toFile, fromCols, toCols, editable, isManual, onC
         {fk.integrity_pct !== null && fk.integrity_pct !== undefined && (
           <span className={`text-xs ${fk.integrity_pct >= 90 ? "text-green-600" : "text-amber-600"}`}>
             {fk.integrity_pct.toFixed(0)}% match
+          </span>
+        )}
+        {/* A3: many-to-many join warning — shown when cardinality data is available */}
+        {fk.join_type === "many_to_many" && (
+          <span
+            title={`Many-to-many join: the referenced column has up to ${fk.dim_max_dup ?? "?"} duplicate key values. Dashboard will pre-aggregate this table to avoid row duplication.`}
+            className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded cursor-help"
+          >
+            M:N — pre-agg
+          </span>
+        )}
+        {fk.join_type && fk.join_type !== "many_to_many" && fk.join_type !== "unverified" && (
+          <span className="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded">
+            {fk.join_type === "one_to_one" ? "1:1" : "N:1"}
           </span>
         )}
         {isManual ? (

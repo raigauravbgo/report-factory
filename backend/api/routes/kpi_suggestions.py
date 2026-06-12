@@ -63,11 +63,39 @@ def select_kpis(
     if errors:
         raise HTTPException(422, {"message": "KPI formula validation failed.", "errors": errors})
 
+    # D1: resolve catalog KPI formulas to actual column names in this dataset
+    resolved_kpi_formulas: dict[str, str] = {}
+    resolution_warnings: list[dict] = []
+    try:
+        from db.database import get_kpi_catalog
+        catalog = {k["kpi_id"]: k for k in get_kpi_catalog()}
+        for kpi_id in req.selected_kpi_ids:
+            if kpi_id in catalog:
+                resolved = kpi_suggester.resolve_kpi_formula(catalog[kpi_id], available_cols)
+                if resolved:
+                    resolved_kpi_formulas[kpi_id] = resolved
+                    # D2: validate the resolved formula to catch resolution errors early
+                    val_result = validator.validate_kpi_formula(resolved, available_cols)
+                    if not val_result.valid:
+                        for e in val_result.errors:
+                            resolution_warnings.append({"kpi_id": kpi_id, **e.model_dump()})
+                else:
+                    resolution_warnings.append({
+                        "kpi_id": kpi_id,
+                        "field": "formula",
+                        "message": f"Could not map catalog fields for '{kpi_id}' to any column in this dataset. The KPI will use the catalog formula name.",
+                        "severity": "warning",
+                    })
+    except Exception:
+        pass  # resolution is best-effort; don't block the select if it fails
+
     # Create a new dict to ensure SQLAlchemy detects the JSON mutation
     new_context = {
         **(dataset.pipeline_context or {}),
         "selected_kpi_ids": req.selected_kpi_ids,
         "custom_kpis": [k.model_dump() for k in req.custom_kpis],
+        "kpi_source_map": req.kpi_source_map,  # kpi_id → upload_id of source fact table
+        "resolved_kpi_formulas": resolved_kpi_formulas,  # D1: column-resolved formulas
     }
     dataset.pipeline_context = new_context
     dataset.pipeline_stage = "dimension_selection"
@@ -78,5 +106,6 @@ def select_kpis(
         "selected_kpi_ids": req.selected_kpi_ids,
         "custom_kpi_count": len(req.custom_kpis),
         "pipeline_stage": dataset.pipeline_stage,
-        "validation": {"valid": True, "errors": []},
+        "resolved_formula_count": len(resolved_kpi_formulas),
+        "validation": {"valid": True, "errors": resolution_warnings},
     }

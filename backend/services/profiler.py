@@ -19,6 +19,16 @@ _HIGH_CARDINALITY_RATIO = 0.5
 # …unless the absolute unique count is small enough to still be categorical
 _MAX_DIMENSION_UNIQUES = 100
 
+# Column name patterns that suggest an ordinal/rating measure despite low cardinality
+_ORDINAL_MEASURE_HINTS = re.compile(
+    r"\b(score|rating|grade|satisfaction|stars|points|mark|rubric|csat|nps|effort|sentiment|rank|level)\b",
+    re.IGNORECASE,
+)
+
+# Excel date serials: integer range covering 1990-01-01 to 2035-12-31
+_EXCEL_DATE_SERIAL_MIN = 32874   # 1990-01-01
+_EXCEL_DATE_SERIAL_MAX = 49710   # 2035-12-31
+
 
 def profile(df: pd.DataFrame, upload_id: int) -> ProfilingResult:
     row_count = len(df)
@@ -68,6 +78,24 @@ def _classify(
 
     # Numeric dtype
     if pd.api.types.is_numeric_dtype(series):
+        # B3: Excel date serial detection — numeric column with a date name hint
+        # whose values fall in the plausible Excel serial range (1990–2035)
+        if _DATE_NAME_HINTS.search(name) and len(non_null) > 0:
+            min_val = float(non_null.min())
+            max_val = float(non_null.max())
+            if _EXCEL_DATE_SERIAL_MIN <= min_val and max_val <= _EXCEL_DATE_SERIAL_MAX:
+                try:
+                    parsed = pd.to_datetime(non_null, unit="D", origin="1899-12-30", errors="coerce")
+                    if parsed.notna().mean() >= 0.85 and parsed.dt.year.between(1990, 2035).mean() >= 0.85:
+                        return "date", "date"
+                except Exception:
+                    pass
+
+        # B2: Ordinal measure detection — low cardinality numeric with a score/rating name
+        # These are actual measures (1–5 CSAT, 0–100 rubric) not categorical dimensions
+        if unique_count <= 10 and _ORDINAL_MEASURE_HINTS.search(name):
+            return "numeric", "measure"
+
         # Low unique count numerics (e.g. boolean-like flags) work better as dimensions
         if unique_count <= 5:
             return "categorical", "dimension"

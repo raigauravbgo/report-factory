@@ -6,6 +6,7 @@ from models.data_model import DataModel
 from models.dataset import Dataset
 from models.upload import Upload
 from schemas.interview import (
+    BridgeDim,
     ConfirmDataModelRequest,
     DataModelFkEntry,
     DataModelResponse,
@@ -25,6 +26,8 @@ def _to_response(dm: DataModel, validation: ValidationResult | None = None) -> D
     tables = [DataModelTableEntry(**t) for t in (dm.tables or [])]
     fks = [DataModelFkEntry(**f) for f in (dm.foreign_keys or [])]
     pks = {str(k): v for k, v in (dm.primary_keys or {}).items()}
+    raw_bridges = data_modeler.detect_bridge_dims(dm.tables or [], dm.foreign_keys or [])
+    bridge_dims = [BridgeDim(**b) for b in raw_bridges]
     return DataModelResponse(
         id=dm.id,
         dataset_id=dm.dataset_id,
@@ -33,6 +36,7 @@ def _to_response(dm: DataModel, validation: ValidationResult | None = None) -> D
         primary_keys=pks,
         foreign_keys=fks,
         ai_reasoning=dm.ai_reasoning,
+        bridge_dims=bridge_dims,
         validation=validation,
     )
 
@@ -106,6 +110,7 @@ def confirm_data_model(
             "table_overrides": [o.model_dump() for o in req.table_overrides],
             "pk_overrides": req.pk_overrides,
             "fk_overrides": [o.model_dump() for o in req.fk_overrides],
+            "primary_fact_upload_id": req.primary_fact_upload_id,
         },
         db,
     )

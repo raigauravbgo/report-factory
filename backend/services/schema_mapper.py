@@ -13,6 +13,12 @@ import re
 
 import pandas as pd
 
+# Column name patterns that signal ordinal measures (scores/ratings with low cardinality)
+_ORDINAL_MEASURE_HINTS = re.compile(
+    r"\b(score|rating|grade|satisfaction|stars|points|mark|rubric|csat|nps|effort|sentiment|rank|level)\b",
+    re.IGNORECASE,
+)
+
 from schemas.upload import ColumnProfile, ProfilingResult
 
 logger = logging.getLogger(__name__)
@@ -154,7 +160,12 @@ def _infer_role(detected_type: str, col: ColumnProfile) -> str:
     if detected_type == "boolean":
         return "boolean"
     if detected_type in ("int", "float"):
-        # Low cardinality numeric → treat as dimension (e.g. status codes)
+        # B2: Ordinal measure — low cardinality numeric whose name signals a score/rating.
+        # Check this BEFORE the generic low-cardinality→dimension rule so that
+        # avg_csat_rating (unique=5), rubric_score, etc. are correctly kept as measures.
+        if col.unique_count <= 10 and _ORDINAL_MEASURE_HINTS.search(col.name):
+            return "measure"
+        # Low cardinality numeric → treat as dimension (e.g. status codes, flag columns)
         if col.unique_count <= 5:
             return "dimension"
         return "measure"

@@ -100,6 +100,14 @@ export interface DataModelTableEntry {
   role: TableRole;
   confidence: number;
   confirmed_role: TableRole | null;
+  is_primary_fact?: boolean;
+}
+
+export interface BridgeDim {
+  dim_upload_id: number;
+  dim_filename: string;
+  fact_upload_ids: number[];
+  fact_filenames: string[];
 }
 
 export interface DataModelFkEntry {
@@ -110,6 +118,10 @@ export interface DataModelFkEntry {
   confidence: number;
   integrity_pct: number | null;
   confirmed: boolean;
+  // A1: join cardinality (populated after data_modeler runs; absent for legacy FKs)
+  join_type?: "one_to_one" | "many_to_one" | "many_to_many" | "unverified";
+  dim_max_dup?: number | null;
+  dim_unique_ratio?: number | null;
 }
 
 export interface DataModelResponse {
@@ -120,6 +132,7 @@ export interface DataModelResponse {
   primary_keys: Record<string, string[]>;
   foreign_keys: DataModelFkEntry[];
   ai_reasoning: string | null;
+  bridge_dims?: BridgeDim[];
   validation: ValidationResult | null;
 }
 
@@ -133,6 +146,8 @@ export interface ChatMessage {
 export interface KpiSpec {
   name: string;
   formula: string;
+  upload_id?: number;
+  resolved_formula?: string | null; // D1: column-resolved formula; overrides formula at eval time
 }
 
 export interface InterviewResult {
@@ -160,6 +175,7 @@ export interface KpiSuggestion {
   formula: string;
   relevance_score: number;
   reasoning: string;
+  upload_id?: number;
 }
 
 // ── Dimension Suggestions ─────────────────────────────────────────────────────
@@ -236,6 +252,8 @@ export interface KpiSummaryCard {
   formula: string;
   value: number;
   count: number;
+  null_count?: number; // E2: rows where formula returned NaN/null
+  null_pct?: number;   // E2: percentage of null rows (0–100)
 }
 
 export interface DashboardMetric {
