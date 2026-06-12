@@ -272,28 +272,43 @@ def _load_joined_df(config: RecipeConfig, db: Session, engine) -> pd.DataFrame:
         to_col: str = fk["to_col"]
 
         # Only join dimension tables that haven't been joined yet
+        _MAX_JOIN_ROWS = 500_000
         if from_uid == fact_uid and to_uid in frames and to_uid not in joined_uids:
             dim_df = frames[to_uid]
             # Drop columns already present in result (except the join key)
             drop_cols = [c for c in dim_df.columns if c in result.columns and c != to_col]
-            result = result.merge(
+            merged = result.merge(
                 dim_df.drop(columns=drop_cols),
                 left_on=from_col,
                 right_on=to_col,
                 how="left",
                 suffixes=("", f"_{to_uid}"),
             )
+            if len(merged) > _MAX_JOIN_ROWS:
+                logger.warning(
+                    "FK join produced %d rows (limit %d) for upload %d — skipping join.",
+                    len(merged), _MAX_JOIN_ROWS, to_uid,
+                )
+            else:
+                result = merged
             joined_uids.add(to_uid)
         elif to_uid == fact_uid and from_uid in frames and from_uid not in joined_uids:
             dim_df = frames[from_uid]
             drop_cols = [c for c in dim_df.columns if c in result.columns and c != from_col]
-            result = result.merge(
+            merged = result.merge(
                 dim_df.drop(columns=drop_cols),
                 left_on=to_col,
                 right_on=from_col,
                 how="left",
                 suffixes=("", f"_{from_uid}"),
             )
+            if len(merged) > _MAX_JOIN_ROWS:
+                logger.warning(
+                    "FK join produced %d rows (limit %d) for upload %d — skipping join.",
+                    len(merged), _MAX_JOIN_ROWS, from_uid,
+                )
+            else:
+                result = merged
             joined_uids.add(from_uid)
 
     return result
@@ -375,6 +390,9 @@ def get_dashboard_data(
     has_dates = False
     if date_col and date_col in df.columns:
         df["__date__"] = pd.to_datetime(df[date_col], errors="coerce")
+        df["__date__"] = df["__date__"].clip(
+            lower=pd.Timestamp("1900-01-01"), upper=pd.Timestamp("2100-12-31")
+        )
         freq = _GRANULARITY_FREQ.get(config.granularity or "monthly", "M")
         df["__period__"] = df["__date__"].dt.to_period(freq).astype(str)
         has_dates = bool(df["__date__"].notna().any())

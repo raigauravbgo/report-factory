@@ -403,6 +403,20 @@
     "reviewed": true
   },
   {
+    "kpi_id": "affirm_adherence_pct",
+    "display_name": "Adherence % (Affirm)",
+    "description": "Measures how closely Affirm agents followed their schedule. Calculated as total minutes in adherence divided by total monitored minutes (Min. in Adherence + Min. out Adherence).",
+    "numerator": "min_in_adherence",
+    "denominator": "min_in_adherence + min_out_adherence",
+    "aggregation": "ratio_of_sums",
+    "format": "percentage",
+    "domain": "workforce",
+    "expected_range": { "min": 0, "max": 1 },
+    "aliases": ["Adherence %", "schedule adherence Affirm", "adherence rate", "affirm adherence"],
+    "source_fields": ["min_in_adherence", "min_out_adherence", "Min. in Adherence", "Min. out Adherence"],
+    "reviewed": true
+  },
+  {
     "kpi_id": "category_score",
     "display_name": "Category Score",
     "description": "Score for a specific category within a QA evaluation form (e.g. Greeting, Call Handling, Accuracy, Soft Skills). Identifies strengths or improvement areas per category.",

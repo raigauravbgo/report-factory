@@ -20,6 +20,20 @@ const NULL_HANDLING_OPTIONS: { value: NullHandling; label: string }[] = [
   { value: "carry_forward", label: "Carry forward" },
 ];
 
+function extractColsFromFormula(formula: string): string[] {
+  const f = formula.trim();
+  const aggMatch = f.match(/^(?:mean|avg|average|sum|count|median|max|min)\(([^)]+)\)$/i);
+  if (aggMatch) return [aggMatch[1].trim()];
+  if (f.includes("/")) {
+    return f.split("/").flatMap((p) => {
+      const m = p.trim().match(/^(?:mean|avg|sum|count|median|max|min)\(([^)]+)\)$/i);
+      return [m ? m[1].trim() : p.trim()];
+    });
+  }
+  if (!/[+\-*()]/.test(f)) return [f];
+  return [];
+}
+
 export default function RecipePage() {
   const { recipeId } = useParams<{ recipeId: string }>();
   const router = useRouter();
@@ -31,6 +45,7 @@ export default function RecipePage() {
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [formulaErrors, setFormulaErrors] = useState<Record<number, boolean>>({});
+  const [kpiWarnings, setKpiWarnings] = useState<{ kpiName: string; column: string; sourceFile: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,6 +59,20 @@ export default function RecipePage() {
           const schema = await api.getDatasetSchema(r.config.dataset_id);
           const cols = schema.uploads.flatMap((u) => u.columns.map((c) => c.column_name));
           setAvailableCols(cols);
+
+          // Warn if a KPI formula references a column that only exists in a secondary upload
+          const primaryUpload = schema.uploads.find((u) => u.upload_id === r.config.upload_id);
+          const primaryColSet = new Set(primaryUpload?.columns.map((c) => c.column_name) ?? []);
+          const warnings: { kpiName: string; column: string; sourceFile: string }[] = [];
+          for (const kpi of r.config.kpis) {
+            for (const col of extractColsFromFormula(kpi.formula)) {
+              if (!primaryColSet.has(col) && cols.includes(col)) {
+                const src = schema.uploads.find((u) => u.columns.some((c) => c.column_name === col));
+                warnings.push({ kpiName: kpi.name, column: col, sourceFile: src?.filename ?? "another file" });
+              }
+            }
+          }
+          setKpiWarnings(warnings);
         } catch {
           // Non-fatal: formula validation will still work client-side with empty list
         }
@@ -183,6 +212,21 @@ export default function RecipePage() {
       {/* KPI definitions with live formula validation */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">KPI definitions</h2>
+
+        {kpiWarnings.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-1.5">
+            <p className="text-sm font-medium text-amber-800">Column mismatch — these KPIs will not appear on the dashboard</p>
+            {kpiWarnings.map((w, i) => (
+              <p key={i} className="text-xs text-amber-700">
+                <span className="font-semibold">{w.kpiName}</span>: column{" "}
+                <code className="rounded bg-amber-100 px-1">{w.column}</code> is in{" "}
+                <span className="font-medium">{w.sourceFile}</span>, not in the primary fact table.
+                Update the formula to use a column from the main file.
+              </p>
+            ))}
+          </div>
+        )}
+
         <div className="space-y-2">
           {config.kpis.map((kpi, i) => (
             <div key={i} className="rounded-lg border border-gray-200 bg-white px-4 py-3 grid grid-cols-2 gap-4">
