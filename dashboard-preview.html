@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BGO Dashboard — Preview</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:   #0f172a;
+      --navy2:  #1e293b;
+      --blue:   #2563eb;
+      --blue-l: #eff6ff;
+      --green:  #16a34a;
+      --green-l:#f0fdf4;
+      --amber:  #d97706;
+      --amber-l:#fffbeb;
+      --red:    #dc2626;
+      --red-l:  #fef2f2;
+      --slate:  #64748b;
+      --border: #e2e8f0;
+      --bg:     #f8fafc;
+      --white:  #ffffff;
+      --text:   #0f172a;
+      --muted:  #94a3b8;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: var(--navy);
+      color: white;
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .header-logo {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      color: #93c5fd;
+      text-transform: uppercase;
+    }
+    .header-divider { width: 1px; height: 22px; background: #334155; }
+    .header-title { font-size: 15px; font-weight: 600; color: white; }
+    .header-subtitle { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+    .header-right { display: flex; align-items: center; gap: 10px; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .badge-approved { background: #052e16; color: #4ade80; border-color: #166534; }
+    .badge-draft    { background: #451a03; color: #fbbf24; border-color: #92400e; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: transparent;
+      color: #cbd5e1;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn:hover { background: #1e293b; }
+    .btn-primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: white;
+    }
+    .btn-primary:hover { background: #1d4ed8; }
+
+    /* ── Freshness bar ── */
+    .freshness {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 8px 28px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .freshness-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+    .freshness-warn { color: var(--amber); font-weight: 600; }
+
+    /* ── Tab bar ── */
+    .tabbar {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
+      display: flex;
+      align-items: flex-end;
+      gap: 0;
+      position: sticky;
+      top: 60px;
+      z-index: 90;
+    }
+    .tab {
+      padding: 14px 20px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--slate);
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: all .15s;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--blue); border-bottom-color: var(--blue); font-weight: 600; }
+    .tab-icon { font-size: 14px; }
+    .tab-count {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--red-l);
+      color: var(--red);
+    }
+
+    /* ── Page body ── */
+    .page { max-width: 1200px; margin: 0 auto; padding: 28px 28px 60px; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Situation banner ── */
+    .situation {
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin-bottom: 24px;
+      border-left: 5px solid var(--red);
+      background: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .situation.medium { border-left-color: var(--amber); }
+    .situation.low    { border-left-color: #22c55e; }
+    .situation-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+    .situation-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .situation-label.critical { color: var(--red); }
+    .situation-label.medium   { color: var(--amber); }
+    .situation-label.low      { color: var(--green); }
+    .situation-headline { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
+    .situation-body { font-size: 13px; color: #475569; line-height: 1.6; }
+    .situation-pills { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .situation-pill {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+    .pill-driver  { background: #fef3c7; color: #92400e; }
+    .pill-impact  { background: #fee2e2; color: #991b1b; }
+    .pill-action  { background: #eff6ff; color: #1e40af; }
+
+    /* ── Section heading ── */
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .section-head h2 {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .section-head hr {
+      flex: 1;
+      border: none;
+      border-top: 1px solid var(--border);
+    }
+    .section-head .section-meta {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* ── KPI cards ── */
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+    @media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+
+    .kpi-card {
+      background: white;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,.05);
+      padding: 16px 18px;
+      border-top: 3px solid var(--border);
+      position: relative;
+      overflow: hidden;
+      transition: box-shadow .15s;
+    }
+    .kpi-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    .kpi-card.good    { border-top-color: #22c55e; }
+    .kpi-card.warning { border-top-color: var(--amber); }
+    .kpi-card.risk    { border-top-color: var(--red); }
+    .kpi-card.neutral { border-top-color: #94a3b8; }
+
+    .kpi-name {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .kpi-value-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+    .kpi-value { font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+    .kpi-card.good    .kpi-value { color: var(--green); }
+    .kpi-card.warning .kpi-value { color: var(--amber); }
+    .kpi-card.risk    .kpi-value { color: var(--red);  }
+    .kpi-card.neutral .kpi-value { color: #334155; }
+
+    .kpi-delta {
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .kpi-delta.up   { color: var(--green); }
+    .kpi-delta.down { color: var(--red);   }
+    .kpi-delta.flat { color: var(--slate); }
+
+    .kpi-status-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .kpi-status {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      text-transform: capitalize;
+    }
+    .kpi-card.good    .kpi-status { background: var(--green-l); color: var(--green); }
+    .kpi-card.warning .kpi-status { background: var(--amber-l); color: var(--amber); }
+    .kpi-card.risk    .kpi-status { background: var(--red-l);   color: var(--red);   }
+    .kpi-card.neutral .kpi-status { background: #f1f5f9;        color: var(--slate); }
+
+    .kpi-period { font-size: 10px; color: var(--muted); }
+    .kpi-interpretation {
+      font-size: 11px;
+      color: #475569;
+      line-height: 1.5;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: var(--bg);
+      border-left: 3px solid var(--border);
+      margin-top: 4px;
+    }
+    .kpi-card.risk    .kpi-interpretation { background: #fff5f5; border-left-color: #fca5a5; }
+    .kpi-card.warning .kpi-interpretation { background: #fffbeb; border-left-color: #fcd34d; }
+    .kpi-card.good    .kpi-interpretation { background: #f0fdf4; border-left-color: #86efac; }
+    .kpi-prior { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+
+    /* ── Chart containers ── */
+    .chart-card {
+      background: white;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,.05);
+      padding: 20px 22px;
+      margin-bottom: 16px;
+    }
+    .chart-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 3px;
+    }
+    .chart-subtitle {
+      font-size: 11px;
+      color: var(--slate);
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 800px) { .chart-grid { grid-template-columns: 1fr; } }
+
+    .chart-canvas-wrap { position: relative; height: 200px; }
+    .chart-canvas-wrap-tall { position: relative; height: 260px; }
+
+    /* ── Insight callout beside chart ── */
+    .chart-with-insight { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+    @media (max-width: 1000px) { .chart-with-insight { grid-template-columns: 1fr; } }
+    .insight-aside {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .insight-aside-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--muted);
+    }
+    .insight-aside-item { display: flex; flex-direction: column; gap: 2px; }
+    .insight-aside-key { font-size: 10px; font-weight: 600; color: var(--slate); text-transform: uppercase; letter-spacing: .06em; }
+    .insight-aside-val { font-size: 12px; color: #334155; line-height: 1.5; }
+
+    /* ── Driver bars ── */
+    .driver-bar-item {
+      display: grid;
+      grid-template-columns: 140px 1fr 60px;
+      align-items: center;
+      gap: 12px;
+      padding: 7px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .driver-bar-item:last-child { border-bottom: none; }
+    .driver-bar-name { font-size: 12px; color: #334155; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .driver-bar-track { height: 10px; border-radius: 5px; background: #f1f5f9; position: relative; overflow: hidden; }
+    .driver-bar-fill { height: 100%; border-radius: 5px; transition: width .3s; }
+    .driver-bar-fill.above { background: #22c55e; }
+    .driver-bar-fill.below { background: #f87171; }
+    .driver-bar-fill.avg   { background: #94a3b8; }
+    .driver-bar-val { font-size: 12px; font-weight: 700; color: #334155; text-align: right; }
+    .driver-bar-val.above { color: var(--green); }
+    .driver-bar-val.below { color: var(--red);   }
+    .driver-avg-line {
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .driver-avg-line::before {
+      content: '';
+      display: inline-block;
+      width: 16px;
+      height: 2px;
+      background: repeating-linear-gradient(90deg,#94a3b8 0,#94a3b8 4px,transparent 4px,transparent 8px);
+    }
+
+    /* ── Actions table ── */
+    .action-table { width: 100%; border-collapse: collapse; }
+    .action-table th {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--muted);
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 2px solid var(--border);
+      background: var(--bg);
+    }
+    .action-table td {
+      padding: 13px 14px;
+      font-size: 13px;
+      color: #334155;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: top;
+    }
+    .action-table tr:last-child td { border-bottom: none; }
+    .action-table tr:hover td { background: #fafbfc; }
+    .priority-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .priority-dot::before { content: ''; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .priority-dot.critical::before { background: var(--red); }
+    .priority-dot.high::before     { background: #f97316; }
+    .priority-dot.medium::before   { background: var(--amber); }
+    .priority-dot.low::before      { background: #94a3b8; }
+    .priority-dot.critical { color: var(--red); }
+    .priority-dot.high     { color: #c2410c; }
+    .priority-dot.medium   { color: #92400e; }
+    .priority-dot.low      { color: var(--slate); }
+
+    .action-owner {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .action-avatar {
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .impact-chip {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--blue-l);
+      color: var(--blue);
+    }
+    .impact-chip.positive { background: var(--green-l); color: var(--green); }
+    .impact-chip.negative { background: var(--red-l);   color: var(--red);   }
+
+    .action-desc { font-size: 13px; color: var(--text); font-weight: 500; margin-bottom: 3px; }
+    .action-sub  { font-size: 11px; color: var(--slate); }
+
+    /* ── Filter bar ── */
+    .filter-bar {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .filter-bar-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .filter-item { display: flex; align-items: center; gap: 8px; }
+    .filter-item label { font-size: 12px; color: var(--slate); }
+    .filter-item select {
+      font-size: 12px;
+      color: #334155;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 10px;
+      cursor: pointer;
+      outline: none;
+    }
+    .filter-item select:focus { border-color: var(--blue); box-shadow: 0 0 0 2px #bfdbfe; }
+    .filter-clear { margin-left: auto; font-size: 12px; color: var(--muted); cursor: pointer; }
+    .filter-clear:hover { color: var(--text); }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .empty-state-icon { font-size: 32px; margin-bottom: 10px; }
+
+    /* ── Sparkline mini ── */
+    .kpi-spark { height: 36px; margin-top: 8px; }
+
+    /* ── Scroll anchor offset ── */
+    section { scroll-margin-top: 120px; }
+
+    /* ── Two-col layout on trend tab ── */
+    .trend-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .trend-kpi-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .trend-chip {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 999px;
+      border: 1.5px solid var(--border);
+      cursor: pointer;
+      background: white;
+      color: var(--slate);
+    }
+    .trend-chip.active { background: var(--blue); border-color: var(--blue); color: white; }
+
+    /* ── Divider ── */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+    /* ── Footer note ── */
+    .preview-note {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      background: var(--navy);
+      color: #94a3b8;
+      font-size: 11px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.2);
+      z-index: 999;
+    }
+    .preview-note strong { color: #60a5fa; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ────────────────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-left">
+    <span class="header-logo">BGO AI</span>
+    <div class="header-divider"></div>
+    <div>
+      <div class="header-title">Customer Experience Report</div>
+      <div class="header-subtitle">Jan 2025 – May 2025 · 12,480 records</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="badge badge-approved">✓ Approved</span>
+    <button class="btn">📅 Date range</button>
+    <button class="btn">⬇ Export</button>
+    <button class="btn btn-primary">✏ Edit recipe</button>
+  </div>
+</header>
+
+<!-- ── Freshness bar ──────────────────────────────────────────────────────── -->
+<div class="freshness">
+  <span class="freshness-dot"></span>
+  <span>Coverage: Jan 2025 – May 2025</span>
+  <span>·</span>
+  <span>Latest data: 2025-05-31</span>
+  <span>·</span>
+  <span>12,480 rows</span>
+  <span>·</span>
+  <span>Refreshed 09:42 AM</span>
+  <span class="freshness-warn">⚠ 3.2% of rows have missing dates and were excluded</span>
+</div>
+
+<!-- ── Tab bar ───────────────────────────────────────────────────────────── -->
+<nav class="tabbar">
+  <div class="tab active" onclick="showTab('overview')"  id="tab-overview">
+    <span class="tab-icon">📊</span> Overview
+  </div>
+  <div class="tab" onclick="showTab('trends')"   id="tab-trends">
+    <span class="tab-icon">📈</span> Trends
+  </div>
+  <div class="tab" onclick="showTab('drivers')"  id="tab-drivers">
+    <span class="tab-icon">🔍</span> Drivers
+  </div>
+  <div class="tab" onclick="showTab('actions')"  id="tab-actions">
+    <span class="tab-icon">⚡</span> Actions
+    <span class="tab-count">3</span>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+  TAB: OVERVIEW
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="page tab-panel active" id="panel-overview">
+
+  <!-- Filter bar -->
+  <div class="filter-bar">
+    <span class="filter-bar-label">Filter</span>
+    <div class="filter-item">
+      <label>Team</label>
+      <select>
+        <option>All teams</option>
+        <option>Team A</option>
+        <option>Team B</option>
+        <option>Team C</option>
+        <option>Team D</option>
+      </select>
+    </div>
+    <div class="filter-item">
+      <label>Location</label>
+      <select>
+        <option>All locations</option>
+        <option>Philippines</option>
+        <option>US CARE</option>
+        <option>Mexico</option>
+      </select>
+    </div>
+    <div class="filter-item">
+      <label>Product</label>
+      <select>
+        <option>All products</option>
+        <option>Auto Loan</option>
+        <option>Credit Card</option>
+        <option>Mortgage</option>
+      </select>
+    </div>
+    <span class="filter-clear">Clear all ×</span>
+  </div>
+
+  <!-- Situation banner -->
+  <div class="situation">
+    <div class="situation-icon">🔴</div>
+    <div>
+      <div class="situation-label critical">Critical · May 2025</div>
+      <div class="situation-headline">CSAT declined 6.8 pts over 3 months — Team B is the primary driver</div>
+      <div class="situation-body">
+        Team B handled 38% of total volume in May but contributed 61% of negative CSAT responses.
+        Average Handle Time for Team B rose 22% month-over-month, correlating with the satisfaction drop.
+        Without intervention, projected CSAT for June falls below the 75% SLA threshold.
+      </div>
+      <div class="situation-pills">
+        <span class="situation-pill pill-driver">Driver: AHT +22% in Team B</span>
+        <span class="situation-pill pill-impact">Impact: SLA breach risk by June</span>
+        <span class="situation-pill pill-action">Action: Escalation coaching this week</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI Scorecards -->
+  <section>
+    <div class="section-head">
+      <h2>KPI Scorecards</h2>
+      <hr />
+      <span class="section-meta">May 2025 vs Apr 2025</span>
+    </div>
+    <div class="kpi-grid">
+
+      <!-- CSAT -->
+      <div class="kpi-card risk">
+        <div class="kpi-name">CSAT Score</div>
+        <div class="kpi-value-row">
+          <span class="kpi-value">79.4%</span>
+          <span class="kpi-delta down">▼ 6.8 pts</span>
+        </div>
+        <div class="kpi-status-row">
+          <span class="kpi-status">At Risk</span>
+          <span class="kpi-period">May 2025</span>
+        </div>
+        <div class="kpi-prior">Prior period: 86.2%</div>
+        <div class="kpi-interpretation">
+          3 consecutive months declining. Team B accounts for 61% of negative responses. Immediate coaching needed.
+        </div>
+        <canvas class="kpi-spark" id="spark-csat"></canvas>
+      </div>
+
+      <!-- FCR -->
+      <div class="kpi-card good">
+        <div class="kpi-name">First Contact Resolution</div>
+        <div class="kpi-value-row">
+          <span class="kpi-value">84.1%</span>
+          <span class="kpi-delta up">▲ 1.2 pts</span>
+        </div>
+        <div class="kpi-status-row">
+          <span class="kpi-status">Good</span>
+          <span class="kpi-period">May 2025</span>
+        </div>
+        <div class="kpi-prior">Prior period: 82.9%</div>
+        <div class="kpi-interpretation">
+          Highest FCR in 6 months. Team A and Team C are above the 83% target. Stable trend.
+        </div>
+        <canvas class="kpi-spark" id="spark-fcr"></canvas>
+      </div>
+
+      <!-- AHT -->
+      <div class="kpi-card warning">
+        <div class="kpi-name">Avg Handle Time</div>
+        <div class="kpi-value-row">
+          <span class="kpi-value">6.4m</span>
+          <span class="kpi-delta down">▲ 0.8m</span>
+        </div>
+        <div class="kpi-status-row">
+          <span class="kpi-status">Warning</span>
+          <span class="kpi-period">May 2025</span>
+        </div>
+        <div class="kpi-prior">Prior period: 5.6m</div>
+        <div class="kpi-interpretation">
+          Creeping up for 2 months. Team B is the outlier at 8.1m vs. 5.2m average for other teams.
+        </div>
+        <canvas class="kpi-spark" id="spark-aht"></canvas>
+      </div>
+
+      <!-- SLA -->
+      <div class="kpi-card warning">
+        <div class="kpi-name">SLA Adherence</div>
+        <div class="kpi-value-row">
+          <span class="kpi-value">91.3%</span>
+          <span class="kpi-delta down">▼ 2.1 pts</span>
+        </div>
+        <div class="kpi-status-row">
+          <span class="kpi-status">Warning</span>
+          <span class="kpi-period">May 2025</span>
+        </div>
+        <div class="kpi-prior">Prior period: 93.4%</div>
+        <div class="kpi-interpretation">
+          Slipping toward the 90% threshold. Primarily driven by longer handle times in Team B.
+        </div>
+        <canvas class="kpi-spark" id="spark-sla"></canvas>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Quick Trend snapshot -->
+  <section>
+    <div class="section-head">
+      <h2>Trend Snapshot</h2>
+      <hr />
+      <span class="section-meta">Last 5 months · <a href="#" onclick="showTab('trends'); return false;" style="color:var(--blue);text-decoration:none">View full trends →</a></span>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-card">
+        <div class="chart-title">CSAT has declined every month since February</div>
+        <div class="chart-subtitle">Three-month consecutive drop · Target: 85%</div>
+        <div class="chart-canvas-wrap"><canvas id="overview-csat-trend"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">AHT is rising — Team B adding ~2 extra minutes per call</div>
+        <div class="chart-subtitle">Handle time crept up as CSAT declined · Target: ≤ 6.0m</div>
+        <div class="chart-canvas-wrap"><canvas id="overview-aht-trend"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+  TAB: TRENDS
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="page tab-panel" id="panel-trends">
+
+  <div class="trend-header">
+    <div>
+      <div class="section-head" style="margin-bottom:4px"><h2>Trend Over Time</h2><hr /></div>
+      <div style="font-size:12px;color:var(--slate)">Monthly performance · Jan – May 2025 · Dashed line = average</div>
+    </div>
+    <div class="trend-kpi-chips">
+      <div class="trend-chip active">CSAT</div>
+      <div class="trend-chip active">FCR</div>
+      <div class="trend-chip active">AHT</div>
+      <div class="trend-chip">SLA</div>
+    </div>
+  </div>
+
+  <div class="chart-with-insight" style="margin-bottom:20px">
+    <div class="chart-card" style="margin-bottom:0">
+      <div class="chart-title">CSAT dropped 6.8 pts over 3 months — a structural decline, not a spike</div>
+      <div class="chart-subtitle">Feb 2025 was the inflection point. April and May accelerated the drop.</div>
+      <div class="chart-canvas-wrap-tall"><canvas id="trend-csat-full"></canvas></div>
+    </div>
+    <div class="insight-aside">
+      <div class="insight-aside-label">📌 CSAT Insight</div>
+      <div class="insight-aside-item">
+        <span class="insight-aside-key">Finding</span>
+        <span class="insight-aside-val">CSAT declined from 86.2% to 79.4% — a 6.8 pt drop over 3 months.</span>
+      </div>
+      <div class="insight-aside-item">
+        <span class="insight-aside-key">Driver</span>
+        <span class="insight-aside-val">Team B's AHT increased 22% while handling 38% of volume.</span>
+      </div>
+      <div class="insight-aside-item">
+        <span class="insight-aside-key">Impact</span>
+        <span class="insight-aside-val">SLA breach risk in June if trend continues.</span>
+      </div>
+      <div class="insight-aside-item">
+        <span class="insight-aside-key">Action</span>
+        <span class="insight-aside-val">Use Team A (87.2%) as the coaching benchmark for Team B.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-grid">
+    <div class="chart-card">
+      <div class="chart-title">FCR is improving — highest in 6 months in May</div>
+      <div class="chart-subtitle">Stable upward trend · Target: 83%</div>
+      <div class="chart-canvas-wrap"><canvas id="trend-fcr-full"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">AHT climbing — 22% above target in Team B</div>
+      <div class="chart-subtitle">Target: ≤ 6.0 min · Overall average: 6.4 min</div>
+      <div class="chart-canvas-wrap"><canvas id="trend-aht-full"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">SLA adherence slipping toward the 90% threshold</div>
+      <div class="chart-subtitle">2.1 pt drop since March · Target: ≥ 93%</div>
+      <div class="chart-canvas-wrap"><canvas id="trend-sla-full"></canvas></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+  TAB: DRIVERS
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="page tab-panel" id="panel-drivers">
+
+  <div class="section-head" style="margin-bottom:20px">
+    <h2>Driver Analysis</h2>
+    <hr />
+    <span class="section-meta">Color = above (green) / below (red) average</span>
+  </div>
+
+  <!-- CSAT by Team -->
+  <div class="chart-card" style="margin-bottom:16px">
+    <div class="chart-title">CSAT by Team — Team B is 11.9 pts below average</div>
+    <div class="chart-subtitle">May 2025 · Average: 81.4% — all segments ranked highest to lowest</div>
+    <div class="driver-avg-line">Average: 81.4%</div>
+    <div id="driver-csat-team"></div>
+  </div>
+
+  <!-- AHT by Team -->
+  <div class="chart-card" style="margin-bottom:16px">
+    <div class="chart-title">AHT by Team — Team B adds 2.9 minutes above average</div>
+    <div class="chart-subtitle">May 2025 · Average: 5.5 min — lower is better</div>
+    <div class="driver-avg-line">Average: 5.5 min</div>
+    <div id="driver-aht-team"></div>
+  </div>
+
+  <!-- CSAT by Location -->
+  <div class="chart-card">
+    <div class="chart-title">CSAT by Location — Philippines leads at 88.3%</div>
+    <div class="chart-subtitle">May 2025 · Average: 82.6% · 3 locations compared</div>
+    <div class="driver-avg-line">Average: 82.6%</div>
+    <div id="driver-csat-location"></div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+  TAB: ACTIONS
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="page tab-panel" id="panel-actions">
+
+  <div class="section-head" style="margin-bottom:8px">
+    <h2>Recommended Actions</h2>
+    <hr />
+    <span class="section-meta">3 open · Sorted by priority</span>
+  </div>
+  <p style="font-size:12px;color:var(--slate);margin-bottom:20px">
+    Generated from insight analysis · May 2025 data · Assign owners and track completion
+  </p>
+
+  <div class="chart-card" style="padding:0;overflow:hidden">
+    <table class="action-table">
+      <thead>
+        <tr>
+          <th style="width:90px">Priority</th>
+          <th>Action</th>
+          <th style="width:110px">KPI Impact</th>
+          <th style="width:120px">Expected Impact</th>
+          <th style="width:130px">Owner</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="priority-dot critical">Critical</span></td>
+          <td>
+            <div class="action-desc">Escalation coaching for Team B this week</div>
+            <div class="action-sub">
+              Team B AHT is 8.1m vs. 5.5m avg · Team A (87.2% CSAT) to serve as benchmark ·
+              Focus on escalation clarity and resolution-time targets
+            </div>
+          </td>
+          <td>
+            <span class="impact-chip positive">CSAT ▲</span><br/>
+            <span style="font-size:10px;color:var(--muted);margin-top:3px;display:block">+3–5 pts est.</span>
+          </td>
+          <td>
+            <span class="impact-chip positive">+3–5 pts CSAT</span><br/>
+            <span style="font-size:10px;color:var(--muted);margin-top:3px;display:block">2–4 weeks</span>
+          </td>
+          <td>
+            <div class="action-owner">
+              <div class="action-avatar">OL</div>
+              <span>Ops Lead, Team B</span>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="priority-dot high">High</span></td>
+          <td>
+            <div class="action-desc">Review and tighten AHT target for Team B</div>
+            <div class="action-sub">
+              Current target is 6.0m, Team B averaging 8.1m · Consider interim target of 7.0m with
+              weekly check-ins · Monitor correlation with CSAT recovery
+            </div>
+          </td>
+          <td>
+            <span class="impact-chip">AHT ▼</span><br/>
+            <span style="font-size:10px;color:var(--muted);margin-top:3px;display:block">−1.5m est.</span>
+          </td>
+          <td>
+            <span class="impact-chip positive">−1.5 min AHT</span><br/>
+            <span style="font-size:10px;color:var(--muted);margin-top:3px;display:block">3–6 weeks</span>
+          </td>
+          <td>
+            <div class="action-owner">
+              <div class="action-avatar" style="background:#7c3aed">TL</div>
+              <span>Team Lead, B</span>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td><span class="priority-dot medium">Medium</span></td>
+          <td>
+            <div class="action-desc">Investigate SLA adherence drop in May</div>
+            <div class="action-sub">
+              SLA fell from 93.4% to 91.3% · Close to the 90% contractual threshold ·
+              Identify which case types are breaching SLA and redistribute to Teams A/C if needed
+            </div>
+          </td>
+          <td>
+            <span class="impact-chip">SLA ▲</span><br/>
+            <span style="font-size:10px;color:var(--muted);margin-top:3px;display:block">+2 pts est.</span>
+          </td>
+          <td>
+            <span class="impact-chip positive">+2 pts SLA</span><br/>
+            <span style="font-size:10px;color:var(--muted);margin-top:3px;display:block">1–2 weeks</span>
+          </td>
+          <td>
+            <div class="action-owner">
+              <div class="action-avatar" style="background:#059669">PM</div>
+              <span>Program Manager</span>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- Root cause summary -->
+  <div class="section-head">
+    <h2>Root Cause Summary</h2>
+    <hr />
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:0">
+    <div class="chart-card" style="border-left:4px solid var(--red)">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--red);margin-bottom:6px">Root Cause #1</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">AHT increase in Team B</div>
+      <div style="font-size:12px;color:#475569;line-height:1.6">Handle time rose from 5.6m to 8.1m — agents spending more time on escalations without resolution. Likely caused by unclear escalation path.</div>
+    </div>
+    <div class="chart-card" style="border-left:4px solid var(--amber)">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--amber);margin-bottom:6px">Root Cause #2</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Volume concentration in Team B</div>
+      <div style="font-size:12px;color:#475569;line-height:1.6">Team B handles 38% of total volume. A single team's performance now disproportionately drags overall CSAT.</div>
+    </div>
+    <div class="chart-card" style="border-left:4px solid #94a3b8">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8;margin-bottom:6px">Root Cause #3</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">No benchmark visibility</div>
+      <div style="font-size:12px;color:#475569;line-height:1.6">Team B has no regular exposure to Team A's practices (87.2% CSAT). Peer coaching or shadowing sessions not scheduled.</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Preview note ───────────────────────────────────────────────────────── -->
+<div class="preview-note">
+  <strong>Design Preview</strong> · Approve to implement →
+</div>
+
+<script>
+  // ── Tab switching ─────────────────────────────────────────────────────────
+  function showTab(name) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+    document.getElementById('tab-' + name).classList.add('active');
+  }
+
+  // ── Shared chart defaults ─────────────────────────────────────────────────
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May'];
+  const gridColor = '#f1f5f9';
+  const tickColor = '#94a3b8';
+  const baseOpts = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: {
+      backgroundColor: '#1e293b', titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+      padding: 10, cornerRadius: 6,
+    }},
+    scales: {
+      x: { grid: { display: false }, ticks: { color: tickColor, font: { size: 10 } } },
+      y: { grid: { color: gridColor, drawBorder: false }, ticks: { color: tickColor, font: { size: 10 } } },
+    },
+  };
+
+  // ── Data ──────────────────────────────────────────────────────────────────
+  const csatData = [86.2, 85.1, 83.8, 81.6, 79.4];
+  const fcrData  = [80.1, 81.3, 82.0, 82.9, 84.1];
+  const ahtData  = [5.5,  5.5,  5.7,  5.9,  6.4];
+  const slaData  = [93.8, 93.6, 93.4, 92.1, 91.3];
+
+  function avgLine(data) {
+    const avg = data.reduce((a,b)=>a+b,0)/data.length;
+    return data.map(() => avg);
+  }
+
+  // ── Sparklines ────────────────────────────────────────────────────────────
+  function spark(id, data, color) {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: MONTHS,
+        datasets: [{ data, borderColor: color, borderWidth: 2, pointRadius: 0, tension: .4, fill: false }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { display: false }, y: { display: false } },
+      }
+    });
+  }
+  spark('spark-csat', csatData, '#dc2626');
+  spark('spark-fcr',  fcrData,  '#16a34a');
+  spark('spark-aht',  ahtData,  '#d97706');
+  spark('spark-sla',  slaData,  '#d97706');
+
+  // ── Overview trends ───────────────────────────────────────────────────────
+  function lineChart(id, data, color, yMin) {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: MONTHS,
+        datasets: [
+          { label: 'Value', data, borderColor: color, backgroundColor: color+'22',
+            borderWidth: 2.5, pointRadius: 4, pointBackgroundColor: color, tension: .4, fill: true },
+          { label: 'Avg', data: avgLine(data), borderColor: '#cbd5e1', borderDash: [5,5],
+            borderWidth: 1.5, pointRadius: 0, fill: false }
+        ]
+      },
+      options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: yMin } } }
+    });
+  }
+
+  lineChart('overview-csat-trend', csatData, '#dc2626', 76);
+  lineChart('overview-aht-trend',  ahtData,  '#d97706', 4.8);
+  lineChart('trend-csat-full',     csatData, '#dc2626', 76);
+  lineChart('trend-fcr-full',      fcrData,  '#16a34a', 78);
+  lineChart('trend-aht-full',      ahtData,  '#d97706', 4.8);
+  lineChart('trend-sla-full',      slaData,  '#2563eb', 88);
+
+  // ── Driver bars (custom HTML) ─────────────────────────────────────────────
+  function renderDriverBars(containerId, rows, avg, max) {
+    const c = document.getElementById(containerId);
+    if (!c) return;
+    c.innerHTML = rows.map(r => {
+      const pct = (r.v / max) * 100;
+      const cls = r.v > avg ? 'above' : 'below';
+      return `
+        <div class="driver-bar-item">
+          <div class="driver-bar-name" title="${r.n}">${r.n}</div>
+          <div class="driver-bar-track"><div class="driver-bar-fill ${cls}" style="width:${pct}%"></div></div>
+          <div class="driver-bar-val ${cls}">${r.v}</div>
+        </div>`;
+    }).join('');
+  }
+
+  renderDriverBars('driver-csat-team', [
+    {n:'Team A', v:87.2}, {n:'Team C', v:85.0}, {n:'Team D', v:81.4}, {n:'Team B', v:69.5}
+  ], 81.4, 95);
+
+  renderDriverBars('driver-aht-team', [
+    {n:'Team B', v:8.1}, {n:'Team D', v:6.0}, {n:'Team A', v:5.2}, {n:'Team C', v:4.8}
+  ], 5.5, 10);
+
+  renderDriverBars('driver-csat-location', [
+    {n:'Philippines', v:88.3}, {n:'US CARE', v:82.6}, {n:'Mexico', v:77.0}
+  ], 82.6, 95);
+</script>
+</body>
+</html>

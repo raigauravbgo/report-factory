@@ -1,0 +1,46 @@
+# BGO Report Factory — local container stack.
+#
+# The app ships with SQLite as its database (DATABASE_URL=sqlite:///./report_factory.db),
+# so no separate DB container is required. The SQLite file and uploaded files are persisted
+# in named volumes so data survives container restarts.
+#
+# To move to PostgreSQL/MySQL in production: add a db service, add the matching driver to
+# backend/requirements.txt (psycopg2-binary / PyMySQL), and point DATABASE_URL at it.
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Keep the SQLite file on a persisted volume rather than the ephemeral layer.
+      DATABASE_URL: sqlite:////data/report_factory.db
+    volumes:
+      - ./backend:/app
+      - api_db:/data
+      - api_uploads:/app/local_uploads
+    # Apply Alembic migrations, then start the API with autoreload.
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+
+  web:
+    image: node:20-slim
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - web_node_modules:/app/node_modules
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      - api
+
+volumes:
+  api_db:
+  api_uploads:
+  web_node_modules:
