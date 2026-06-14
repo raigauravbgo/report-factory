@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { ChatMessage, InterviewResult } from "@/lib/types";
@@ -13,7 +13,7 @@ const STEP_LABELS = [
   "Filters",
 ];
 
-export default function InterviewPage() {
+function InterviewPageInner() {
   const router = useRouter();
   const params = useSearchParams();
   const uploadId = Number(params.get("uploadId"));
@@ -213,5 +213,15 @@ export default function InterviewPage() {
         </form>
       )}
     </main>
+  );
+}
+
+// Next.js 16 requires a component reading useSearchParams() to sit inside a
+// Suspense boundary, otherwise static prerender bails out and the build fails.
+export default function InterviewPage() {
+  return (
+    <Suspense fallback={null}>
+      <InterviewPageInner />
+    </Suspense>
   );
 }

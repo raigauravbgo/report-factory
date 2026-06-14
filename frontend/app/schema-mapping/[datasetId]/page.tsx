@@ -66,7 +66,7 @@ export default function SchemaMappingPage({ params }: PageProps) {
       ...prev,
       [uploadId]: {
         ...(prev[uploadId] ?? {}),
-        [colName]: { column_name: colName, ...(prev[uploadId]?.[colName] ?? {}), ...patch },
+        [colName]: { ...(prev[uploadId]?.[colName] ?? {}), ...patch, column_name: colName },
       },
     }));
   }
