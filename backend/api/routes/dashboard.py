@@ -521,6 +521,7 @@ def get_dashboard_data(
         "kpi_summaries": [],
         "time_series": {},
         "dimension_breakdowns": {},
+        "dimension_spreads": {},
         "insights": [],
         "data_quality": {"status": "ok", "row_count": 0, "most_recent_date": None, "date_coverage": None, "warnings": ["No data rows found."]},
     }
