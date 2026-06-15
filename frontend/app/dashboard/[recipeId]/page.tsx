@@ -820,6 +820,7 @@ function EnhancedDashboard(props: EnhancedDashboardProps) {
   } = props;
 
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [showAllDims, setShowAllDims] = useState(false);
 
   const insightFor = (kpiName: string) => getInsightForKpi(data.insights, kpiName);
   const sparkFor = (kpiName: string): number[] =>
@@ -984,21 +985,59 @@ function EnhancedDashboard(props: EnhancedDashboardProps) {
                   Edit recipe
                 </button>
               </div>
-            ) : (
-              <div className="grid gap-3 lg:grid-cols-2 items-start">
-                {Object.entries(data.dimension_breakdowns).flatMap(([dim, kpis]) =>
-                  Object.entries(kpis).map(([kpiName, breakdown]) => (
-                    <DriverBarsSection
-                      key={`${dim}-${kpiName}`}
-                      dim={dim}
-                      kpiName={kpiName}
-                      breakdown={breakdown}
-                      insight={insightFor(kpiName)}
-                    />
-                  )),
-                )}
-              </div>
-            )}
+            ) : (() => {
+              const sortedDims = Object.keys(data.dimension_breakdowns).sort(
+                (a, b) => (data.dimension_spreads?.[b] ?? 0) - (data.dimension_spreads?.[a] ?? 0),
+              );
+              const [topDim, ...remainingDims] = sortedDims;
+
+              const renderDimSection = (dim: string) => (
+                <div key={dim}>
+                  {(data.dimension_spreads?.[dim] ?? 0) < 0.02 && (
+                    <p className="text-xs text-slate-400 italic mb-2 px-1">
+                      No significant variation across segments for{" "}
+                      <span className="font-medium">{dim}</span>
+                    </p>
+                  )}
+                  <div className="grid gap-3 lg:grid-cols-2 items-start">
+                    {Object.entries(data.dimension_breakdowns[dim]).map(([kpiName, breakdown]) => (
+                      <DriverBarsSection
+                        key={`${dim}-${kpiName}`}
+                        dim={dim}
+                        kpiName={kpiName}
+                        breakdown={breakdown}
+                        insight={insightFor(kpiName)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+
+              return (
+                <div className="space-y-6">
+                  {renderDimSection(topDim)}
+                  {remainingDims.length > 0 && (
+                    <>
+                      <div className="flex justify-center">
+                        <button
+                          onClick={() => setShowAllDims((v) => !v)}
+                          className="text-xs font-medium px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                        >
+                          {showAllDims
+                            ? "Hide extra dimensions ↑"
+                            : `Show ${remainingDims.length} more dimension${remainingDims.length === 1 ? "" : "s"} ↓`}
+                        </button>
+                      </div>
+                      {showAllDims && (
+                        <div className="space-y-6">
+                          {remainingDims.map((dim) => renderDimSection(dim))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
         {activeTab === "actions" && (
