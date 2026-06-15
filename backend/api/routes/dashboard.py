@@ -731,6 +731,8 @@ def get_dashboard_data(
     breakdown_kpis = [k for k in config.kpis if k.name in breakdown_kpi_names] or config.kpis
 
     dimension_breakdowns: dict = {}
+    dim_kpi_spreads: dict[str, list[float]] = {}
+
     for dim in ordered_dims:
         # RC2: dimension may only be present in a secondary fact's joined DataFrame,
         # so check all available DataFrames — not just the primary fact df.
@@ -738,6 +740,7 @@ def get_dashboard_data(
         if not dim_in_any:
             continue
         dimension_breakdowns[dim] = {}
+        dim_kpi_spreads[dim] = []
         for kpi in breakdown_kpis:
             kdf = _df_for_kpi(kpi)
             if kdf.empty or dim not in kdf.columns:
@@ -747,37 +750,30 @@ def get_dashboard_data(
                 continue
             kdf = kdf.copy()
             kdf["__val__"] = series
-            grouped = (
+            grouped_full = (
                 kdf.groupby(dim)["__val__"]
                 .mean()
                 .reset_index()
                 .sort_values("__val__", ascending=False)
-                .head(20)
             )
+            # Compute spread from full (non-truncated) data before capping display rows
+            full_values = grouped_full["__val__"].dropna().tolist()
+            if len(full_values) >= 2:
+                mean_val = sum(full_values) / len(full_values)
+                if abs(mean_val) >= 1e-9:
+                    dim_kpi_spreads[dim].append((max(full_values) - min(full_values)) / abs(mean_val))
+            grouped = grouped_full.head(20)
             dimension_breakdowns[dim][kpi.name] = [
                 {"name": str(row[dim]), "value": round(float(row["__val__"]) if pd.notna(row["__val__"]) else 0.0, 2)}
                 for _, row in grouped.iterrows()
             ]
 
-    # Compute spread per dimension: (max_segment - min_segment) / mean, averaged across KPIs
-    def _spread_for_dim(kpis_data: dict) -> float:
-        kpi_spreads = []
-        for segments in kpis_data.values():
-            values = [s["value"] for s in segments]
-            if len(values) < 2:
-                continue
-            mean_val = sum(values) / len(values)
-            if mean_val == 0:
-                continue
-            kpi_spreads.append((max(values) - min(values)) / mean_val)
-        return sum(kpi_spreads) / len(kpi_spreads) if kpi_spreads else 0.0
-
     dimension_spreads: dict[str, float] = {
-        dim: round(_spread_for_dim(kpis_data), 4)
-        for dim, kpis_data in dimension_breakdowns.items()
+        dim: round(sum(spreads) / len(spreads), 4) if spreads else 0.0
+        for dim, spreads in dim_kpi_spreads.items()
     }
     dimension_breakdowns = dict(
-        sorted(dimension_breakdowns.items(), key=lambda x: dimension_spreads[x[0]], reverse=True)
+        sorted(dimension_breakdowns.items(), key=lambda x: dimension_spreads.get(x[0], 0.0), reverse=True)
     )
 
     metrics = _build_metrics(kpi_summaries, time_series)
