@@ -303,6 +303,7 @@ export interface DashboardData {
   kpi_summaries: KpiSummaryCard[];
   time_series: Record<string, Array<{ period: string; value: number }>>;
   dimension_breakdowns: Record<string, Record<string, Array<{ name: string; value: number }>>>;
+  dimension_spreads: Record<string, number>;
   insights: DashboardInsight[];
   data_quality: DataQuality;
 }
