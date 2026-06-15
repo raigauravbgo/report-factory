@@ -1281,7 +1281,7 @@ export default function DashboardPage({ params }: PageProps) {
   const [filtering, setFiltering]       = useState(false);
   const [error, setError]               = useState<string | null>(null);
 
-  const [view, setView] = useState<"classic" | "enhanced">("classic");
+  const [view, setView] = useState<"classic" | "enhanced">("enhanced");
 
   useEffect(() => {
     const stored = localStorage.getItem("bgo_dashboard_view") as "classic" | "enhanced" | null;
@@ -1290,7 +1290,11 @@ export default function DashboardPage({ params }: PageProps) {
 
   const handleViewChange = (v: "classic" | "enhanced") => {
     setView(v);
-    localStorage.setItem("bgo_dashboard_view", v);
+    if (v === "enhanced") {
+      localStorage.setItem("bgo_dashboard_view", v);
+    } else {
+      localStorage.removeItem("bgo_dashboard_view");
+    }
   };
 
   // Initial load: recipe + unfiltered data
