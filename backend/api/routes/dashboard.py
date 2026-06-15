@@ -716,26 +716,18 @@ def get_dashboard_data(
         ]
 
     # Dimension breakdowns
-    # Only bar-type chart entries contribute to Driver Analysis.
-    # show_breakdown (default True) lets users disable a specific bar entry.
+    # KPI scope: bar entries determine which KPIs appear in Drivers (unchanged)
+    # Dimension scope: always use config.dimensions — the user's explicit selection
     bar_entries = [
         c for c in config.chart_layout
         if c.type == "bar" and getattr(c, "show_breakdown", True)
     ]
     if bar_entries:
         breakdown_kpi_names = {c.kpi for c in bar_entries}
-        breakdown_dims = [c.group_by for c in bar_entries if c.group_by]
-        # Preserve original dimension order, deduplicate
-        _seen: set[str] = set()
-        ordered_dims: list[str] = []
-        for _d in breakdown_dims:
-            if _d not in _seen:
-                _seen.add(_d)
-                ordered_dims.append(_d)
     else:
-        # No bar entries → fall back to all KPIs × configured dimensions
         breakdown_kpi_names = {k.name for k in config.kpis}
-        ordered_dims = list(config.dimensions or [])[:3]
+
+    ordered_dims: list[str] = list(config.dimensions or [])
     breakdown_kpis = [k for k in config.kpis if k.name in breakdown_kpi_names] or config.kpis
 
     dimension_breakdowns: dict = {}
@@ -767,6 +759,27 @@ def get_dashboard_data(
                 for _, row in grouped.iterrows()
             ]
 
+    # Compute spread per dimension: (max_segment - min_segment) / mean, averaged across KPIs
+    def _spread_for_dim(kpis_data: dict) -> float:
+        kpi_spreads = []
+        for segments in kpis_data.values():
+            values = [s["value"] for s in segments]
+            if len(values) < 2:
+                continue
+            mean_val = sum(values) / len(values)
+            if mean_val == 0:
+                continue
+            kpi_spreads.append((max(values) - min(values)) / mean_val)
+        return sum(kpi_spreads) / len(kpi_spreads) if kpi_spreads else 0.0
+
+    dimension_spreads: dict[str, float] = {
+        dim: round(_spread_for_dim(kpis_data), 4)
+        for dim, kpis_data in dimension_breakdowns.items()
+    }
+    dimension_breakdowns = dict(
+        sorted(dimension_breakdowns.items(), key=lambda x: dimension_spreads[x[0]], reverse=True)
+    )
+
     metrics = _build_metrics(kpi_summaries, time_series)
     insights = _generate_insights(metrics, dimension_breakdowns)
     data_quality = _assess_data_quality(df, date_col)
@@ -783,6 +796,7 @@ def get_dashboard_data(
         "kpi_summaries": kpi_summaries,
         "time_series": time_series,
         "dimension_breakdowns": dimension_breakdowns,
+        "dimension_spreads": dimension_spreads,
         "insights": insights,
         "data_quality": data_quality,
     }
