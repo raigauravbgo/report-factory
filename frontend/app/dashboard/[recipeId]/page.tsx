@@ -610,6 +610,7 @@ function DriverBarsSection({
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
       <div className="text-[13px] font-bold text-slate-900 mb-0.5 leading-snug">{title}</div>
       <div className="text-[11px] text-slate-500 mb-3">{subtitle}</div>
+      <div className={breakdown.length > 8 ? "max-h-64 overflow-y-auto pr-1 -mr-1" : ""}>
       {breakdown.map((row) => {
         const pct = barPct(row.value);
         const above = row.value >= avg;
@@ -651,6 +652,7 @@ function DriverBarsSection({
           </div>
         );
       })}
+      </div>
       {!allEqual && (
         <div className="flex items-center gap-1.5 mt-2.5 text-[10px] text-slate-400">
           <span className="inline-block w-px h-3 bg-slate-500" />
@@ -993,13 +995,16 @@ function EnhancedDashboard(props: EnhancedDashboardProps) {
 
               const renderDimSection = (dim: string) => (
                 <div key={dim}>
-                  {(data.dimension_spreads?.[dim] ?? 0) < 0.02 && (
-                    <p className="text-xs text-slate-400 italic mb-2 px-1">
-                      No significant variation across segments for{" "}
-                      <span className="font-medium">{dim}</span>
-                    </p>
-                  )}
-                  <div className="grid gap-3 lg:grid-cols-2 items-start">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+                      By {dim.replace(/_/g, " ")}
+                    </span>
+                    <div className="flex-1 h-px bg-slate-200" />
+                    {(data.dimension_spreads?.[dim] ?? 0) < 0.02 && (
+                      <span className="text-[10px] text-slate-400 italic">No significant variation</span>
+                    )}
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-2 items-stretch">
                     {Object.entries(data.dimension_breakdowns[dim]).map(([kpiName, breakdown]) => (
                       <DriverBarsSection
                         key={`${dim}-${kpiName}`}
