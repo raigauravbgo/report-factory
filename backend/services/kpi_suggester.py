@@ -61,20 +61,41 @@ def suggest(dataset_id: int, db: "Session", use_ai: bool = True) -> list[dict]:
                 reasoning = "Potential match based on domain."
             # Find which upload best covers this KPI's source fields
             best_upload_id = _best_upload_for_kpi(kpi, upload_col_map)
-            scored.append(
-                {
-                    "kpi_id": kpi["kpi_id"],
-                    "display_name": kpi["display_name"],
-                    "domain": kpi.get("domain", ""),
-                    "formula": _build_formula(kpi),
-                    "relevance_score": round(effective_score, 3),
-                    "reasoning": reasoning,
-                    "upload_id": best_upload_id,
-                }
-            )
+            entry: dict = {
+                "kpi_id": kpi["kpi_id"],
+                "display_name": kpi["display_name"],
+                "domain": kpi.get("domain", ""),
+                "formula": _build_formula(kpi),
+                "relevance_score": round(effective_score, 3),
+                "reasoning": reasoning,
+                "upload_id": best_upload_id,
+            }
+            if not kpi.get("reviewed", True):
+                entry["is_contributed"] = True
+            scored.append(entry)
 
     scored.sort(key=lambda x: x["relevance_score"], reverse=True)
     top = scored[:_AI_RERANK_TOP_N]
+
+    # Always append user-contributed KPIs (reviewed=False) that the top-N cut
+    # would otherwise discard. They have no source_fields so _score_kpi returns 0,
+    # but they should remain discoverable on the KPI selection page.
+    top_ids = {s["kpi_id"] for s in top}
+    for kpi in catalog:
+        if kpi.get("reviewed", True):
+            continue  # skip official catalog entries
+        if kpi["kpi_id"] in top_ids:
+            continue  # already included via domain match
+        top.append({
+            "kpi_id": kpi["kpi_id"],
+            "display_name": kpi["display_name"],
+            "domain": kpi.get("domain", ""),
+            "formula": _build_formula(kpi),
+            "relevance_score": 0.5,
+            "reasoning": "Contributed to your team's KPI registry — available for reuse.",
+            "upload_id": None,
+            "is_contributed": True,
+        })
 
     if use_ai and top:
         try:

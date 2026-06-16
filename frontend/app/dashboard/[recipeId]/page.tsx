@@ -366,12 +366,14 @@ function EnhancedHeader({
   view,
   onViewChange,
   onEditRecipe,
+  onContributeKpis,
 }: {
   recipe: RecipeResponse;
   data: DashboardData;
   view: "classic" | "enhanced";
   onViewChange: (v: "classic" | "enhanced") => void;
   onEditRecipe: () => void;
+  onContributeKpis?: () => void;
 }) {
   const title = dashboardTitle(recipe.config.kpis);
   const subtitle = [
@@ -420,6 +422,14 @@ function EnhancedHeader({
             </button>
           ))}
         </div>
+        {onContributeKpis && (
+          <button
+            onClick={onContributeKpis}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg border border-blue-500 text-blue-300 hover:bg-blue-700 hover:text-white transition-colors"
+          >
+            📤 Contribute KPIs
+          </button>
+        )}
         <button
           onClick={onEditRecipe}
           className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
@@ -813,12 +823,13 @@ interface EnhancedDashboardProps {
   onFilterChange: (col: string, val: string) => void;
   onClearFilters: () => void;
   onEditRecipe: () => void;
+  onContributeKpis?: () => void;
 }
 
 function EnhancedDashboard(props: EnhancedDashboardProps) {
   const {
     recipe, data, filterOptions, activeFilters, filtering,
-    view, onViewChange, onFilterChange, onEditRecipe,
+    view, onViewChange, onFilterChange, onEditRecipe, onContributeKpis,
   } = props;
 
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -841,6 +852,7 @@ function EnhancedDashboard(props: EnhancedDashboardProps) {
           view={view}
           onViewChange={onViewChange}
           onEditRecipe={onEditRecipe}
+          onContributeKpis={onContributeKpis}
         />
         {data.data_quality && (
           <EnhancedFreshnessStrip
@@ -1380,6 +1392,13 @@ export default function DashboardPage({ params }: PageProps) {
   const insightFor = (kpiName: string) =>
     data.insights.find((ins) => ins.headline.startsWith(kpiName));
 
+  // Show "Contribute KPIs" when there are more KPIs than catalog selections (i.e. custom KPIs exist)
+  const hasCustomKpis =
+    recipe.config.kpis.length > (recipe.config.selected_kpi_ids?.length ?? 0);
+  const handleContributeKpis = hasCustomKpis
+    ? () => router.push(`/kpi-registry/${recipeId}`)
+    : undefined;
+
   if (view === "enhanced") {
     return (
       <EnhancedDashboard
@@ -1399,6 +1418,7 @@ export default function DashboardPage({ params }: PageProps) {
           )
         }
         onEditRecipe={() => router.push(`/recipe/${recipeId}`)}
+        onContributeKpis={handleContributeKpis}
       />
     );
   }
@@ -1432,6 +1452,14 @@ export default function DashboardPage({ params }: PageProps) {
               : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
             {data.approved ? "Approved" : "Draft"}
           </span>
+          {hasCustomKpis && (
+            <button
+              onClick={() => router.push(`/kpi-registry/${recipeId}`)}
+              className="rounded border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100 shadow-sm transition-colors"
+            >
+              📤 Contribute KPIs
+            </button>
+          )}
           <button
             onClick={() => router.push(`/recipe/${recipeId}`)}
             className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 shadow-sm transition-colors"

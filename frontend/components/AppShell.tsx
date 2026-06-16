@@ -11,6 +11,7 @@ const STEPS = [
   { key: "dimension-selection",  label: "Dimensions",      sub: "Slice & filter by",    segment: "dimension-selection",  optional: false },
   { key: "recipe",               label: "Recipe",          sub: "Review & approve",     segment: "recipe",               optional: false },
   { key: "dashboard",            label: "Dashboard",       sub: "Charts & insights",    segment: "dashboard",            optional: false },
+  { key: "kpi-registry",         label: "KPI Registry",    sub: "Optional · contribute", segment: "kpi-registry",         optional: true  },
 ];
 
 function StepIcon({ isDone, isActive, n }: { isDone: boolean; isActive: boolean; n: number }) {

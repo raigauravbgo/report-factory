@@ -22,8 +22,16 @@ def seed() -> None:
     catalog: list[dict] = json.loads(CATALOG_PATH.read_text())
     print(f"Seeding {len(catalog)} KPIs...")
 
+    # Collect the kpi_ids present in the JSON so we only replace official catalog
+    # entries and leave any user-contributed KPIs (not in the JSON) untouched.
+    catalog_ids = [kpi["kpi_id"] for kpi in catalog]
+    placeholders = ",".join("?" * len(catalog_ids))
+
     with get_conn() as conn:
-        conn.execute("DELETE FROM kpi_catalog")
+        conn.execute(
+            f"DELETE FROM kpi_catalog WHERE kpi_id IN ({placeholders})",
+            catalog_ids,
+        )
         for kpi in catalog:
             conn.execute(
                 """INSERT INTO kpi_catalog
@@ -45,7 +53,7 @@ def seed() -> None:
                 ),
             )
 
-    print(f"Done. {len(catalog)} KPIs seeded into kpi_catalog.")
+    print(f"Done. {len(catalog)} catalog KPIs seeded (user-contributed KPIs preserved).")
 
 
 if __name__ == "__main__":

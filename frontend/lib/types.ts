@@ -176,6 +176,7 @@ export interface KpiSuggestion {
   relevance_score: number;
   reasoning: string;
   upload_id?: number;
+  is_contributed?: boolean;
 }
 
 // ── Dimension Suggestions ─────────────────────────────────────────────────────
@@ -306,6 +307,36 @@ export interface DashboardData {
   dimension_spreads: Record<string, number>;
   insights: DashboardInsight[];
   data_quality: DataQuality;
+}
+
+// ── KPI Registry ──────────────────────────────────────────────────────────────
+
+export type KpiFormat = "number" | "percentage" | "currency";
+
+export interface CustomKpiForRegistry {
+  name: string;
+  formula: string;
+}
+
+export interface KpiContribution {
+  name: string;
+  formula: string;
+  domain: string;
+  format: KpiFormat;
+  description: string;
+}
+
+export interface KpiRegistryResponse {
+  recipe_id: number;
+  dataset_id: number;
+  custom_kpis: CustomKpiForRegistry[];
+}
+
+export interface KpiContributeResponse {
+  registered_count: number;
+  skipped_count: number;
+  registered: Array<{ kpi_id: string; display_name: string; domain: string }>;
+  skipped: Array<{ name: string; reason: string }>;
 }
 
 // ── Pipeline stage ────────────────────────────────────────────────────────────

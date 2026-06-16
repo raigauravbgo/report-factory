@@ -10,6 +10,9 @@ import type {
   DimensionSuggestion,
   InterviewResponse,
   InterviewResult,
+  KpiContribution,
+  KpiContributeResponse,
+  KpiRegistryResponse,
   KpiSpec,
   KpiSuggestion,
   ProfilingResult,
@@ -201,6 +204,20 @@ export const api = {
       .join("&");
     return request<DashboardData>(`/dashboard/${recipeId}/data${qs ? `?${qs}` : ""}`);
   },
+
+  // ── KPI Registry ───────────────────────────────────────────────────────────
+  getCustomKpisFromRecipe: (recipeId: number): Promise<KpiRegistryResponse> =>
+    request<KpiRegistryResponse>(`/api/kpis/from-recipe/${recipeId}`),
+
+  contributeKpisToRegistry: (
+    recipeId: number,
+    contributions: KpiContribution[],
+  ): Promise<KpiContributeResponse> =>
+    request<KpiContributeResponse>("/api/kpis/contribute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipe_id: recipeId, contributions }),
+    }),
 
   // ── Validation ─────────────────────────────────────────────────────────────
   validateKpiFormula: (formula: string, availableColumns: string[]): Promise<ValidationResult> =>

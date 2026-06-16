@@ -50,6 +50,11 @@ export default function KpiCard({ kpi, selected, onToggle, sourceFile }: Props) 
             <span className={`shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${domainClass}`}>
               {kpi.domain}
             </span>
+            {kpi.is_contributed && (
+              <span className="shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-violet-50 text-violet-700 border border-violet-200">
+                ★ Team KPI
+              </span>
+            )}
             {sourceFile && (
               <span className="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200" title={`Source: ${sourceFile}`}>
                 {sourceFile.length > 20 ? sourceFile.slice(0, 20) + "…" : sourceFile}
