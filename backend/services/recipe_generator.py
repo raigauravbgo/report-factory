@@ -149,6 +149,33 @@ def generate_from_context(dataset_id: int, db: "Session") -> RecipeConfig:
         source_uid = kpi_source_map.get(ck.get("name", "")) or ck.get("upload_id")
         kpis.append(KpiSpec(name=ck["name"], formula=ck["formula"], upload_id=source_uid))
 
+    # Resolve upload_id for any KPI still None — use ColumnSchema to find which fact table
+    # contains the formula's primary column (e.g. "rubric_score" → staging_7 for QA Score).
+    fact_upload_ids = [u for u in upload_ids if u not in dim_upload_ids]
+    _AGG = re.compile(r"\b(mean|avg|average|sum|count|median|max|min)\b", re.I)
+    _IDENT = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b")
+    for kpi_spec in kpis:
+        if kpi_spec.upload_id is not None:
+            continue
+        # Extract the first non-aggregation identifier from the formula
+        formula_identifiers = [
+            m for m in _IDENT.findall(kpi_spec.formula)
+            if not _AGG.match(m)
+        ]
+        if not formula_identifiers:
+            continue
+        primary_col = formula_identifiers[0]
+        match = (
+            db.query(ColumnSchema.upload_id)
+            .filter(
+                ColumnSchema.column_name == primary_col,
+                ColumnSchema.upload_id.in_(fact_upload_ids),
+            )
+            .first()
+        )
+        if match:
+            kpi_spec.upload_id = match[0]
+
     # Column mappings: only the columns actually used in the recipe
     _AGG_FUNCS = {"mean", "avg", "average", "sum", "count", "median", "max", "min"}
     relevant_cols: set[str] = set()

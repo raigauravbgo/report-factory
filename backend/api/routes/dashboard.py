@@ -473,6 +473,143 @@ def _load_joined_df(config: RecipeConfig, db: Session, engine, fact_uid_override
     return result
 
 
+def _load_fact_with_dim(
+    fact_uid: int,
+    config: "RecipeConfig",
+    db: "Session",
+    engine,
+    active_filters: dict,
+) -> "pd.DataFrame":
+    """Load one fact staging table, LEFT JOIN the dimension/roster table onto it,
+    then apply date parsing and active filters.
+
+    Dimension columns (department, location, pod, etc.) always come from the
+    roster — same-named columns in the fact table are dropped before joining so
+    the roster is the single authoritative source for all dimension values.
+    Returns an empty DataFrame if the staging table is missing or unreadable.
+    """
+    from sqlalchemy import inspect as sa_inspect
+    from models.data_model import DataModel
+    from models.column_schema import ColumnSchema
+
+    inspect = sa_inspect(engine)
+    fact_table = f"staging_{fact_uid}"
+    if not inspect.has_table(fact_table):
+        logger.warning("_load_fact_with_dim: staging table %s not found.", fact_table)
+        return pd.DataFrame()
+
+    try:
+        with engine.connect() as conn:
+            fact_df = pd.read_sql_table(fact_table, conn)
+    except Exception as exc:
+        logger.warning("_load_fact_with_dim: could not load %s: %s", fact_table, exc)
+        return pd.DataFrame()
+
+    if fact_df.empty:
+        return fact_df
+
+    # Locate the dimension table and FK for this fact upload
+    dm = db.query(DataModel).filter(DataModel.dataset_id == config.dataset_id).first()
+    dim_uids: set[int] = set()
+    if dm and dm.tables:
+        for t in dm.tables:
+            role = t.get("confirmed_role") or t.get("role")
+            if role == "dimension":
+                dim_uids.add(t["upload_id"])
+
+    dim_uid: "int | None" = None
+    fact_join_col: "str | None" = None
+    dim_join_col: "str | None" = None
+    if dm and dm.foreign_keys:
+        for fk in dm.foreign_keys:
+            if not fk.get("confirmed", True):
+                continue
+            fu, tu = fk["from_upload_id"], fk["to_upload_id"]
+            if fu == fact_uid and tu in dim_uids:
+                dim_uid, fact_join_col, dim_join_col = tu, fk["from_col"], fk["to_col"]
+                break
+            elif tu == fact_uid and fu in dim_uids:
+                dim_uid, fact_join_col, dim_join_col = fu, fk["to_col"], fk["from_col"]
+                break
+
+    # LEFT JOIN with dimension table — roster is authoritative for dimension columns
+    if dim_uid is not None and fact_join_col and dim_join_col:
+        dim_table = f"staging_{dim_uid}"
+        if inspect.has_table(dim_table):
+            try:
+                with engine.connect() as conn:
+                    dim_df = pd.read_sql_table(dim_table, conn)
+                # Drop same-named columns from the fact so the roster value wins
+                dim_only_cols = [c for c in dim_df.columns if c != dim_join_col]
+                fact_df = fact_df.drop(
+                    columns=[c for c in dim_only_cols if c in fact_df.columns],
+                    errors="ignore",
+                )
+                fact_df = fact_df.merge(
+                    dim_df,
+                    left_on=fact_join_col,
+                    right_on=dim_join_col,
+                    how="left",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "_load_fact_with_dim: could not join dim %s onto fact %d: %s",
+                    dim_table, fact_uid, exc,
+                )
+
+    # Date parsing: config.date_column → ColumnSchema role lookup → keyword heuristic
+    date_col = config.date_column or ""
+    resolved_date_col: "str | None" = date_col if (date_col and date_col in fact_df.columns) else None
+
+    if not resolved_date_col:
+        schema_date = (
+            db.query(ColumnSchema.column_name)
+            .filter(ColumnSchema.upload_id == fact_uid)
+            .filter(
+                (ColumnSchema.confirmed_role == "date")
+                | ((ColumnSchema.confirmed_role.is_(None)) & (ColumnSchema.ai_role == "date"))
+            )
+            .first()
+        )
+        if not schema_date:
+            schema_date = (
+                db.query(ColumnSchema.column_name)
+                .filter(ColumnSchema.upload_id == fact_uid)
+                .filter(
+                    (ColumnSchema.confirmed_type == "date")
+                    | ((ColumnSchema.confirmed_type.is_(None)) & (ColumnSchema.ai_detected_type == "date"))
+                )
+                .first()
+            )
+        if schema_date:
+            resolved_date_col = schema_date[0]
+
+    if not resolved_date_col:
+        _DATE_KW = re.compile(r"\b(date|time|period|month|week|day)\b", re.I)
+        for col in fact_df.columns:
+            if _DATE_KW.search(col):
+                _parsed = pd.to_datetime(fact_df[col], errors="coerce")
+                if _parsed.notna().mean() > 0.5 and (_parsed > pd.Timestamp("1971-01-01")).any():
+                    resolved_date_col = col
+                    break
+
+    if resolved_date_col and resolved_date_col in fact_df.columns:
+        fact_df["__date__"] = pd.to_datetime(fact_df[resolved_date_col], errors="coerce")
+        fact_df["__date__"] = fact_df["__date__"].clip(
+            lower=pd.Timestamp("1900-01-01"), upper=pd.Timestamp("2100-12-31")
+        )
+        if not fact_df["__date__"].isna().all():
+            freq = _GRANULARITY_FREQ.get(config.granularity or "weekly", "W")
+            fact_df["__period__"] = fact_df["__date__"].dt.to_period(freq).astype(str)
+
+    # Apply active filters (dimension values come from roster so filters are consistent)
+    for col, val in active_filters.items():
+        if col in fact_df.columns:
+            fact_df = fact_df[fact_df[col].astype(str) == val]
+
+    return fact_df
+
+
 @router.get("/{recipe_id}/data", response_model=dict)
 def get_dashboard_data(
     recipe_id: int,
@@ -483,6 +620,10 @@ def get_dashboard_data(
 
     Accepts optional filter query params prefixed with ``f_``:
       GET /dashboard/3/data?f_department=US+CARE&f_location=Philippines
+
+    Each fact table is individually joined with the dimension/roster table so
+    that dimension columns (department, location, pod) are consistent across
+    all KPIs and come exclusively from the roster.
     """
     recipe = db.query(ReportRecipe).filter(ReportRecipe.id == recipe_id).first()
     if not recipe:
@@ -491,7 +632,6 @@ def get_dashboard_data(
     config = RecipeConfig(**recipe.config)
     generated_at = datetime.now(timezone.utc).isoformat()
 
-    # Parse active filters from query params (prefix "f_")
     active_filters: dict[str, str] = {
         k[2:]: v
         for k, v in request.query_params.items()
@@ -500,15 +640,115 @@ def get_dashboard_data(
 
     try:
         from sqlalchemy import inspect as sa_inspect
+        from models.column_schema import ColumnSchema
+        from models.data_model import DataModel
+
         engine = db.get_bind()
-        fact_table = f"staging_{config.upload_id}"
-        if not sa_inspect(engine).has_table(fact_table):
-            raise HTTPException(422, f"Staging table for upload {config.upload_id} not found. Re-upload the file.")
-        df = _load_joined_df(config, db, engine)
+        inspect = sa_inspect(engine)
+
+        # Identify dimension upload_ids from DataModel so we don't treat them as fact sources
+        dm = db.query(DataModel).filter(DataModel.dataset_id == config.dataset_id).first()
+        dim_uids: set[int] = set()
+        if dm and dm.tables:
+            for t in dm.tables:
+                role = t.get("confirmed_role") or t.get("role")
+                if role == "dimension":
+                    dim_uids.add(t["upload_id"])
+
+        all_upload_ids: list[int] = list(config.upload_ids) if config.upload_ids else [config.upload_id]
+        fact_upload_ids_in_config: list[int] = [u for u in all_upload_ids if u not in dim_uids]
+
+        # Resolve upload_id for any KPI that doesn't have one (backward-compat for old recipes).
+        # Uses ColumnSchema to find which fact staging table contains the formula's primary column.
+        kpi_upload_map: dict[str, int] = {}
+        for kpi in config.kpis:
+            if kpi.upload_id is not None and kpi.upload_id not in dim_uids:
+                kpi_upload_map[kpi.name] = kpi.upload_id
+            else:
+                needed = _formula_needs_col(kpi.formula)
+                resolved_uid = config.upload_id  # default: primary fact
+                if needed:
+                    match = (
+                        db.query(ColumnSchema.upload_id)
+                        .filter(
+                            ColumnSchema.column_name == needed,
+                            ColumnSchema.upload_id.in_(fact_upload_ids_in_config),
+                        )
+                        .first()
+                    )
+                    if match:
+                        resolved_uid = match[0]
+                kpi_upload_map[kpi.name] = resolved_uid
+                if kpi.upload_id is None:
+                    logger.info(
+                        "KPI '%s' had no upload_id — resolved to upload %d via column '%s'.",
+                        kpi.name, resolved_uid, needed or "unknown",
+                    )
+
+        # Unique fact upload_ids needed, preserving order
+        seen_uids: set[int] = set()
+        fact_uids_needed: list[int] = []
+        for uid in kpi_upload_map.values():
+            if uid not in seen_uids:
+                seen_uids.add(uid)
+                fact_uids_needed.append(uid)
+
+        if not fact_uids_needed or not any(inspect.has_table(f"staging_{u}") for u in fact_uids_needed):
+            raise HTTPException(
+                422,
+                f"No staging tables found for recipe {recipe_id}. Re-upload the files.",
+            )
+
+        # Load each fact joined with roster; active filters applied inside
+        fact_dfs: dict[int, pd.DataFrame] = {}
+        for uid in fact_uids_needed:
+            fact_dfs[uid] = _load_fact_with_dim(uid, config, db, engine, active_filters)
+
+        # Build filter_options from the dimension/roster table (unfiltered — always show all values).
+        # Since all dimension values now come from the roster, it is the authoritative source.
+        filter_cols = [c for c in (config.filters or []) if c]
+        filter_options: dict[str, list[str]] = {}
+        dim_uid_for_opts = next(iter(dim_uids), None)
+        if dim_uid_for_opts and inspect.has_table(f"staging_{dim_uid_for_opts}"):
+            try:
+                with engine.connect() as conn:
+                    dim_opts_df = pd.read_sql_table(f"staging_{dim_uid_for_opts}", conn)
+                for col in filter_cols:
+                    if col in dim_opts_df.columns:
+                        filter_options[col] = sorted(
+                            dim_opts_df[col].dropna().astype(str).unique().tolist()
+                        )[:100]
+                # Expose dimension columns in filter dropdowns too
+                for col in (config.dimensions or []):
+                    if col not in filter_options and col in dim_opts_df.columns:
+                        filter_options[col] = sorted(
+                            dim_opts_df[col].dropna().astype(str).unique().tolist()
+                        )[:100]
+            except Exception as exc:
+                logger.warning("Could not build filter_options from dim table: %s", exc)
+        # Fallback: derive from primary fact df when dim table is unavailable
+        if not filter_options:
+            primary_df_for_opts = fact_dfs.get(config.upload_id) or next(
+                (d for d in fact_dfs.values() if not d.empty), pd.DataFrame()
+            )
+            for col in filter_cols:
+                if col in primary_df_for_opts.columns:
+                    filter_options[col] = sorted(
+                        primary_df_for_opts[col].dropna().astype(str).unique().tolist()
+                    )[:100]
+
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(422, f"Could not load data: {exc}") from exc
+
+    # Primary fact df — used for row_count and data_quality reporting
+    _prim = fact_dfs.get(config.upload_id)
+    primary_df = (
+        _prim if (_prim is not None and not _prim.empty)
+        else next((d for d in fact_dfs.values() if not d.empty), pd.DataFrame())
+    )
+    date_col = config.date_column or ""
 
     empty_envelope = {
         "recipe_id": recipe_id,
@@ -516,7 +756,7 @@ def get_dashboard_data(
         "row_count": 0,
         "approved": bool(recipe.approved_at),
         "active_filters": active_filters,
-        "filter_options": {},
+        "filter_options": filter_options,
         "metrics": [],
         "kpi_summaries": [],
         "time_series": {},
@@ -525,149 +765,16 @@ def get_dashboard_data(
         "insights": [],
         "data_quality": {"status": "ok", "row_count": 0, "most_recent_date": None, "date_coverage": None, "warnings": ["No data rows found."]},
     }
-    if df.empty:
+    if not fact_dfs or all(df.empty for df in fact_dfs.values()):
         return empty_envelope
 
-    # Build filter_options BEFORE applying active filters so dropdowns always show all values
-    filter_cols = [c for c in (config.filters or []) if c in df.columns]
-    filter_options: dict[str, list[str]] = {
-        col: sorted(df[col].dropna().astype(str).unique().tolist())[:100]
-        for col in filter_cols
-    }
-
-    # Apply active filters to the DataFrame
-    for col, val in active_filters.items():
-        if col in df.columns:
-            df = df[df[col].astype(str) == val]
-
-    if df.empty:
-        empty_envelope["filter_options"] = filter_options
+    if primary_df.empty:
         empty_envelope["active_filters"] = active_filters
         return empty_envelope
 
-    # Parse date column
-    date_col = config.date_column or ""
-    has_dates = False
-    if date_col and date_col in df.columns:
-        df["__date__"] = pd.to_datetime(df[date_col], errors="coerce")
-        df["__date__"] = df["__date__"].clip(
-            lower=pd.Timestamp("1900-01-01"), upper=pd.Timestamp("2100-12-31")
-        )
-        freq = _GRANULARITY_FREQ.get(config.granularity or "weekly", "W")
-        df["__period__"] = df["__date__"].dt.to_period(freq).astype(str)
-        has_dates = bool(df["__date__"].notna().any())
-
-    # Partition KPIs into primary (evaluated on main df) and alt (need their own source df)
-    primary_fact_uid = config.upload_id
-    alt_kpis = [k for k in config.kpis if k.upload_id and k.upload_id != primary_fact_uid]
-
-    # All other upload IDs in this recipe that aren't the primary fact
-    other_uids: list[int] = [uid for uid in (config.upload_ids or []) if uid != primary_fact_uid]
-
-    def _load_alt_df(uid: int) -> "pd.DataFrame":
-        """Load, date-parse, and return the staged df for a secondary fact upload."""
-        try:
-            from models.column_schema import ColumnSchema
-            adf = _load_joined_df(config, db, engine, fact_uid_override=uid)
-            if adf.empty:
-                return adf
-            # Prefer the recipe's date column when present; otherwise find this upload's own date column
-            alt_date_col = date_col if (date_col and date_col in adf.columns) else None
-            if not alt_date_col:
-                # Role-based lookup (date role = intended as date axis)
-                schema_date = (
-                    db.query(ColumnSchema.column_name)
-                    .filter(ColumnSchema.upload_id == uid)
-                    .filter(
-                        (ColumnSchema.confirmed_role == "date")
-                        | ((ColumnSchema.confirmed_role.is_(None)) & (ColumnSchema.ai_role == "date"))
-                    )
-                    .first()
-                )
-                if not schema_date:
-                    # Type-based fallback: column detected/confirmed as date type even if role differs
-                    schema_date = (
-                        db.query(ColumnSchema.column_name)
-                        .filter(ColumnSchema.upload_id == uid)
-                        .filter(
-                            (ColumnSchema.confirmed_type == "date")
-                            | ((ColumnSchema.confirmed_type.is_(None)) & (ColumnSchema.ai_detected_type == "date"))
-                        )
-                        .first()
-                    )
-                if schema_date:
-                    alt_date_col = schema_date[0]
-            # Last resort: scan actual df columns for anything with "date" or "time" in the name
-            # that successfully parses as real dates (after 1970). Each file may have its own
-            # date column name (e.g. date_graded, eval_date, survey_date).
-            if not alt_date_col:
-                _DATE_KEYWORDS = re.compile(r"\b(date|time|period|month|week|day)\b", re.I)
-                for col in adf.columns:
-                    if _DATE_KEYWORDS.search(col):
-                        _parsed = pd.to_datetime(adf[col], errors="coerce")
-                        # Require >50% parseable AND at least one value after 1971 (rules out epoch artifacts)
-                        if (_parsed.notna().mean() > 0.5
-                                and (_parsed > pd.Timestamp("1971-01-01")).any()):
-                            alt_date_col = col
-                            break
-            if alt_date_col and alt_date_col in adf.columns:
-                adf["__date__"] = pd.to_datetime(adf[alt_date_col], errors="coerce")
-            else:
-                adf["__date__"] = pd.Series(pd.NaT, index=adf.index, dtype="datetime64[ns]")
-            if not adf["__date__"].isna().all():
-                adf["__date__"] = adf["__date__"].clip(
-                    lower=pd.Timestamp("1900-01-01"), upper=pd.Timestamp("2100-12-31")
-                )
-                freq = _GRANULARITY_FREQ.get(config.granularity or "weekly", "W")
-                adf["__period__"] = adf["__date__"].dt.to_period(freq).astype(str)
-            return adf
-        except Exception as exc:
-            logger.warning("Could not load alt fact table for upload %d: %s", uid, exc)
-            return pd.DataFrame()
-
-    # Build alt DFs: first for KPIs with explicit upload_id, then preload all other uploads
-    # (preloading enables backward-compat fallback for old recipes where upload_id is None)
-    alt_dfs: dict[int, pd.DataFrame] = {}
-    uids_to_load = list({k.upload_id for k in alt_kpis if k.upload_id} | set(other_uids))
-    for uid in uids_to_load:
-        if uid not in alt_dfs:
-            alt_dfs[uid] = _load_alt_df(uid)
-
-    # RC4: augment filter_options with values from alt fact DataFrames (unfiltered) so the
-    # filter dropdown shows all possible values across every fact table in the dataset.
-    for _adf in alt_dfs.values():
-        if _adf.empty:
-            continue
-        for col in filter_cols:
-            if col in _adf.columns:
-                existing = set(filter_options.get(col, []))
-                new_vals = {str(v) for v in _adf[col].dropna().unique()}
-                filter_options[col] = sorted(existing | new_vals)[:100]
-
-    # RC1: apply the same active filters to every alt DataFrame so secondary-fact KPIs
-    # honour the dashboard filter selection (previously only df/primary was filtered).
-    for uid in list(alt_dfs.keys()):
-        _adf = alt_dfs[uid]
-        if _adf.empty:
-            continue
-        for col, val in active_filters.items():
-            if col in _adf.columns:
-                _adf = _adf[_adf[col].astype(str) == val]
-        alt_dfs[uid] = _adf
-
     def _df_for_kpi(kpi) -> "pd.DataFrame":
-        # New recipes: explicit source mapping wins
-        if kpi.upload_id and kpi.upload_id != primary_fact_uid:
-            return alt_dfs.get(kpi.upload_id, pd.DataFrame())
-        # Old recipes (upload_id is None): try primary first, fall back by column presence
-        needed = _formula_needs_col(kpi.formula)
-        if needed and needed not in df.columns:
-            for uid in other_uids:
-                cdf = alt_dfs.get(uid, pd.DataFrame())
-                if not cdf.empty and needed in cdf.columns:
-                    logger.info("KPI '%s': column '%s' not in primary fact — using upload %d as source.", kpi.name, needed, uid)
-                    return cdf
-        return df
+        uid = kpi_upload_map.get(kpi.name)
+        return fact_dfs.get(uid, pd.DataFrame()) if uid is not None else pd.DataFrame()
 
     # KPI summaries
     kpi_summaries = []
@@ -675,14 +782,12 @@ def get_dashboard_data(
         kdf = _df_for_kpi(kpi)
         if kdf.empty:
             continue
-        # D1: prefer resolved_formula (column-level) over catalog formula (field-name-level)
         eval_formula = kpi.resolved_formula or kpi.formula
         series = _eval_kpi(kdf, eval_formula)
         if series is not None and series.notna().any():
             total = len(series)
             valid_count = int(series.notna().sum())
             null_count = total - valid_count
-            # E2: surface null rate so the UI can warn users about data quality
             kpi_summaries.append({
                 "name": kpi.name,
                 "formula": kpi.formula,
@@ -692,9 +797,7 @@ def get_dashboard_data(
                 "null_pct": round(null_count / total * 100, 1) if total > 0 else 0.0,
             })
 
-    # Time-series
-    # Each KPI's source df may have __period__ from its own date column (alt dfs handle this
-    # independently in _load_alt_df), so gate per-kdf rather than on the primary df's has_dates.
+    # Time-series — each KPI's source df has __period__ from its own date column
     time_series: dict = {}
     for kpi in config.kpis:
         kdf = _df_for_kpi(kpi)
@@ -717,17 +820,11 @@ def get_dashboard_data(
         ]
 
     # Dimension breakdowns
-    # KPI scope: bar entries determine which KPIs appear in Drivers (unchanged)
-    # Dimension scope: always use config.dimensions — the user's explicit selection
     bar_entries = [
         c for c in config.chart_layout
         if c.type == "bar" and getattr(c, "show_breakdown", True)
     ]
-    if bar_entries:
-        breakdown_kpi_names = {c.kpi for c in bar_entries}
-    else:
-        breakdown_kpi_names = {k.name for k in config.kpis}
-
+    breakdown_kpi_names = {c.kpi for c in bar_entries} if bar_entries else {k.name for k in config.kpis}
     ordered_dims: list[str] = list(config.dimensions or [])
     breakdown_kpis = [k for k in config.kpis if k.name in breakdown_kpi_names] or config.kpis
 
@@ -735,10 +832,8 @@ def get_dashboard_data(
     dim_kpi_spreads: dict[str, list[float]] = {}
 
     for dim in ordered_dims:
-        # RC2: dimension may only be present in a secondary fact's joined DataFrame,
-        # so check all available DataFrames — not just the primary fact df.
-        dim_in_any = dim in df.columns or any(dim in adf.columns for adf in alt_dfs.values() if not adf.empty)
-        if not dim_in_any:
+        # Dimension column must exist in at least one fact df (all now joined with roster)
+        if not any(dim in df.columns for df in fact_dfs.values() if not df.empty):
             continue
         dimension_breakdowns[dim] = {}
         dim_kpi_spreads[dim] = []
@@ -757,7 +852,6 @@ def get_dashboard_data(
                 .reset_index()
                 .sort_values("__val__", ascending=False)
             )
-            # Compute spread from full (non-truncated) data before capping display rows
             full_values = grouped_full["__val__"].dropna().tolist()
             if len(full_values) >= 2:
                 mean_val = sum(full_values) / len(full_values)
@@ -779,12 +873,12 @@ def get_dashboard_data(
 
     metrics = _build_metrics(kpi_summaries, time_series)
     insights = _generate_insights(metrics, dimension_breakdowns)
-    data_quality = _assess_data_quality(df, date_col)
+    data_quality = _assess_data_quality(primary_df, date_col)
 
     return {
         "recipe_id": recipe_id,
         "generated_at": generated_at,
-        "row_count": len(df),
+        "row_count": len(primary_df),
         "approved": bool(recipe.approved_at),
         "filters": {"date_column": config.date_column, "granularity": config.granularity, "dimensions": config.dimensions},
         "filter_options": filter_options,
