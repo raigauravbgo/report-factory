@@ -520,6 +520,8 @@ def _load_fact_with_dim(
     dim_uid: "int | None" = None
     fact_join_col: "str | None" = None
     dim_join_col: "str | None" = None
+    _fk_join_type: str = "unverified"
+    _fk_max_dup: "int | None" = None
     if dm and dm.foreign_keys:
         for fk in dm.foreign_keys:
             if not fk.get("confirmed", True):
@@ -527,12 +529,21 @@ def _load_fact_with_dim(
             fu, tu = fk["from_upload_id"], fk["to_upload_id"]
             if fu == fact_uid and tu in dim_uids:
                 dim_uid, fact_join_col, dim_join_col = tu, fk["from_col"], fk["to_col"]
+                _fk_join_type = fk.get("join_type", "unverified")
+                _fk_max_dup = fk.get("dim_max_dup")
                 break
             elif tu == fact_uid and fu in dim_uids:
                 dim_uid, fact_join_col, dim_join_col = fu, fk["to_col"], fk["from_col"]
+                _fk_join_type = fk.get("join_type", "unverified")
+                _fk_max_dup = fk.get("dim_max_dup")
                 break
 
-    # LEFT JOIN with dimension table — roster is authoritative for dimension columns
+    _MAX_JOIN_ROWS = 500_000
+
+    # LEFT JOIN with dimension table — roster is authoritative for dimension columns.
+    # Carry over the same safety guards from _load_joined_df that commit f3baa15
+    # accidentally dropped: pre-aggregate many-to-many dims, and deduplicate any dim
+    # that would otherwise cause a row-count explosion beyond _MAX_JOIN_ROWS.
     if dim_uid is not None and fact_join_col and dim_join_col:
         dim_table = f"staging_{dim_uid}"
         if inspect.has_table(dim_table):
@@ -545,6 +556,21 @@ def _load_fact_with_dim(
                     columns=[c for c in dim_only_cols if c in fact_df.columns],
                     errors="ignore",
                 )
+                if _fk_join_type == "many_to_many":
+                    # Pre-aggregate: one row per key prevents cartesian explosion
+                    dim_df = _pre_aggregate_dim(dim_df, dim_join_col, [])
+                elif not _safe_to_merge(
+                    fact_df, fact_join_col, dim_df, dim_join_col,
+                    _MAX_JOIN_ROWS, dim_uid, _fk_max_dup,
+                ):
+                    # Estimated post-join row count exceeds cap — deduplicate the dim
+                    # on the join key so dimension enrichment is preserved without OOM.
+                    logger.warning(
+                        "_load_fact_with_dim: join %s→%s would exceed %d rows "
+                        "(dim %d has duplicate keys); deduplicating on '%s'.",
+                        fact_table, dim_table, _MAX_JOIN_ROWS, dim_uid, dim_join_col,
+                    )
+                    dim_df = dim_df.drop_duplicates(subset=[dim_join_col], keep="first")
                 fact_df = fact_df.merge(
                     dim_df,
                     left_on=fact_join_col,
