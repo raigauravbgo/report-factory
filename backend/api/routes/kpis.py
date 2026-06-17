@@ -106,9 +106,11 @@ def approve_custom_kpi(proposal_id: int, body: dict, db: Session = Depends(get_d
         "reviewed": True,
     }
 
-    # Write to kpis.json — append if kpi_id not present, update if already there
+    # Write to kpis.json — append if kpi_id not present, update if already there.
+    # Keep the original text so we can restore it if the DB commit fails.
     try:
-        catalog: list[dict] = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+        old_catalog_text = _CATALOG_PATH.read_text(encoding="utf-8")
+        catalog: list[dict] = json.loads(old_catalog_text)
         existing_idx = next((i for i, k in enumerate(catalog) if k.get("kpi_id") == proposal.kpi_id), None)
         if existing_idx is not None:
             catalog[existing_idx] = entry
@@ -126,11 +128,19 @@ def approve_custom_kpi(proposal_id: int, body: dict, db: Session = Depends(get_d
     except Exception:
         pass
 
-    # Mark as approved in DB
-    proposal.status = "approved"
-    proposal.formula = formula
-    proposal.description = description
-    db.commit()
+    # Mark as approved in DB — if this fails, roll back the file write to keep file+DB in sync
+    try:
+        proposal.status = "approved"
+        proposal.formula = formula
+        proposal.description = description
+        db.commit()
+    except Exception as exc:
+        try:
+            _CATALOG_PATH.write_text(old_catalog_text, encoding="utf-8")
+            logger.warning("CUSTOM_KPI_ROLLBACK kpi_id=%s — DB commit failed, catalog restored", proposal.kpi_id)
+        except Exception as restore_exc:
+            logger.error("CUSTOM_KPI_ROLLBACK_FAIL kpi_id=%s — catalog may be inconsistent: %r", proposal.kpi_id, restore_exc)
+        raise HTTPException(500, f"Database update failed: {exc}")
 
     return {"status": "approved", "kpi_id": proposal.kpi_id, "written_to_catalog": True}
 

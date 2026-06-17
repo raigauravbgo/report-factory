@@ -19,9 +19,6 @@ interface Validation {
   error?: string | null;
 }
 
-let _idSeq = 0;
-const uid = () => ++_idSeq;
-
 interface KpiRow {
   id: number;
   name: string;
@@ -38,7 +35,7 @@ interface MappingRow {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function configToKpiRows(kpis: RecipeConfig["kpis"]): KpiRow[] {
+function configToKpiRows(kpis: RecipeConfig["kpis"], uid: () => number): KpiRow[] {
   return kpis.map((k) => ({
     id: uid(),
     name: k.name,
@@ -48,7 +45,7 @@ function configToKpiRows(kpis: RecipeConfig["kpis"]): KpiRow[] {
   }));
 }
 
-function configToMappingRows(record: Record<string, string>): MappingRow[] {
+function configToMappingRows(record: Record<string, string>, uid: () => number): MappingRow[] {
   return Object.entries(record).map(([raw, display]) => ({ id: uid(), raw, display }));
 }
 
@@ -105,6 +102,8 @@ export default function RecipePage() {
 
   // Per-formula validation (formula input → backend test-compute)
   const [validations, setValidations] = useState<Record<number, Validation>>({});
+  const _idSeqRef = useRef(0);
+  const uid = () => ++_idSeqRef.current;
   const debounceTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   // Data integrity check (recipe config vs actual staging data)
@@ -149,13 +148,19 @@ export default function RecipePage() {
         setGranularity((cfg.granularity as "daily" | "weekly" | "monthly") ?? "monthly");
         setDimensions(cfg.dimensions ?? []);
         setFilters(cfg.filters ?? []);
-        setKpiRows(configToKpiRows(cfg.kpis ?? []));
-        setMappingRows(configToMappingRows(cfg.column_mappings ?? {}));
+        setKpiRows(configToKpiRows(cfg.kpis ?? [], uid));
+        setMappingRows(configToMappingRows(cfg.column_mappings ?? {}, uid));
         // Kick off data integrity check immediately after load
         setTimeout(() => runConfigValidation(), 200);
       })
       .catch((e) => setError(String(e)));
   }, [recipeId]);
+
+  // ── Clear debounce timers on unmount (F7) ───────────────────────────────
+  useEffect(() => {
+    const timers = debounceTimers.current;
+    return () => { Object.values(timers).forEach(clearTimeout); };
+  }, []);
 
   // ── Auto-detect filter columns missing from column_mappings ──────────────
   useEffect(() => {
@@ -184,10 +189,10 @@ export default function RecipePage() {
             error: res.error,
           },
         }));
-      } catch {
+      } catch (e) {
         setValidations((v) => ({
           ...v,
-          [id]: { status: "invalid", error: "Validation request failed" },
+          [id]: { status: "invalid", error: String(e) },
         }));
       }
     }, 700);
@@ -212,10 +217,10 @@ export default function RecipePage() {
               error: res.error,
             },
           }));
-        } catch {
+        } catch (e) {
           setValidations((v) => ({
             ...v,
-            [row.id]: { status: "invalid", error: "Validation request failed" },
+            [row.id]: { status: "invalid", error: String(e) },
           }));
         }
       }),

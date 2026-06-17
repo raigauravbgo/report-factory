@@ -69,7 +69,14 @@ async def upload_file(request_id: str, file: UploadFile = File(...)):
     contents = await file.read()
     dest_path.write_bytes(contents)
 
-    update_report(request_id, file_path=str(dest_path), status="awaiting_discovery")
+    try:
+        update_report(request_id, file_path=str(dest_path), status="awaiting_discovery")
+    except Exception as exc:
+        try:
+            dest_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(500, f"Failed to record upload in database: {exc}")
 
     return {"file_path": str(dest_path), "filename": filename, "size_bytes": len(contents)}
 

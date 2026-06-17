@@ -65,6 +65,8 @@ def _read_excel(raw: bytes, active_sheet: str) -> ParseResult:
     buf = io.BytesIO(raw)
     xl = pd.ExcelFile(buf, engine="openpyxl")
     sheet_names = xl.sheet_names
+    if not sheet_names:
+        raise ValueError("Excel file contains no worksheets.")
 
     sheet = active_sheet if active_sheet in sheet_names else sheet_names[0]
     df = xl.parse(sheet)

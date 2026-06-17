@@ -1038,6 +1038,7 @@ export default function DashboardPage() {
     if (activeGranularity) params.set("granularity", activeGranularity);
     const url = `${BASE_URL}/api/dashboard/${recipeId}/data${params.size ? `?${params}` : ""}`;
 
+    const wasLoaded = !!data;
     void (async () => {
       setFiltering(true);
       setFilterError(null);
@@ -1046,13 +1047,13 @@ export default function DashboardPage() {
         if (!r.ok) throw new Error(`API ${r.status}`);
         const d = await r.json() as DashboardData;
         setData(d);
-        if (!data) {
+        if (!wasLoaded) {
           setError(null);
           const blankCount = d.kpi_summaries.filter((k) => k.value === null).length;
           logEvent("dashboard_loaded", "dashboard", { kpi_count: d.kpi_summaries.length, blank_count: blankCount }, { recipeId: Number(recipeId) });
         }
       } catch (e) {
-        if (data) setFilterError(String(e));
+        if (wasLoaded) setFilterError(String(e));
         else setError(String(e));
       } finally {
         setLoading(false);

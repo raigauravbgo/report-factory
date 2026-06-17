@@ -79,6 +79,12 @@ export default function DimensionsPage() {
       if (raw) selectedKpis = JSON.parse(raw) as KpiSuggestion[];
     } catch { /* ignore */ }
 
+    if (selectedKpis.length === 0) {
+      setGenerateError("No KPIs selected — please go back and select at least one KPI.");
+      setGenerating(false);
+      return;
+    }
+
     const confirmedRel = (() => {
       try {
         const raw = sessionStorage.getItem(`dataset_${datasetId}_relationships`);

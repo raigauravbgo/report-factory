@@ -46,9 +46,14 @@ def build_virtual_dimension(
 
     combined = pd.concat(parts, ignore_index=True)
 
+    if combined.empty:
+        return None
+
     # Entity key = highest-cardinality common column (most likely the identifier).
     # Purely cardinality-based — no column name assumptions.
     cardinalities = {c: int(combined[c].nunique()) for c in common_cols if c in combined.columns}
+    if not cardinalities:
+        return None
     entity_key = max(cardinalities, key=lambda c: cardinalities[c])
 
     # Single-table stability filter: for single-table mode (min_tables=1) only
@@ -61,7 +66,8 @@ def build_virtual_dimension(
         for col in common_cols:
             if col == entity_key or col not in combined.columns:
                 continue
-            max_nunique_per_entity = int(combined.groupby(entity_key)[col].nunique().max())
+            nunique_max = combined.groupby(entity_key)[col].nunique().max()
+            max_nunique_per_entity = int(nunique_max) if pd.notna(nunique_max) else 0
             if max_nunique_per_entity <= 1:
                 stable_cols.append(col)
         combined = combined[stable_cols]

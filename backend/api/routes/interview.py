@@ -109,7 +109,7 @@ def run_interview(
             return InterviewResponse(
                 message=display,
                 step_index=step,
-                step_label=STEP_LABELS[step - 1],
+                step_label=STEP_LABELS[step - 1] if 1 <= step <= len(STEP_LABELS) else f"Step {step}",
                 completed=done,
                 interview_result=result,
             )
@@ -136,7 +136,7 @@ def run_interview(
     return InterviewResponse(
         message=ai_message,
         step_index=step_index,
-        step_label=STEP_LABELS[step_index - 1],
+        step_label=STEP_LABELS[step_index - 1] if 1 <= step_index <= len(STEP_LABELS) else f"Step {step_index}",
         completed=completed,
         interview_result=result,
     )

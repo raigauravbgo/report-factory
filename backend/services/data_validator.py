@@ -144,11 +144,9 @@ def _denominator_cols_from_formula(formula: str) -> list[str]:
     if "/" not in formula:
         return []
     _, den_part = formula.split("/", 1)
-    # Strip outer whitespace and parentheses
-    den_clean = den_part.strip().strip("()")
-    # M7: Split on +, -, * to handle all compound denominator forms
-    # e.g. col_a / (col_b - col_c) or col_a / (col_b * col_c)
-    parts = [p.strip() for p in re.split(r"\s*[+\-*]\s*", den_clean) if p.strip()]
+    # Extract all identifiers from the denominator expression — works for any
+    # nesting depth: "col_b", "(col_b + col_c)", "(col_b * (col_c + col_d))", etc.
+    parts = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", den_part)
     return parts
 
 

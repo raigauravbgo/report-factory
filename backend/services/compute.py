@@ -319,7 +319,10 @@ def _enrich_dfs(
             cross = _find_cross_name_join_key(enriched[i], donor)
             cross_key        = cross[0] if cross else None
             cross_donor_key  = cross[1] if cross else None
-            cross_card       = int(enriched[i][cross_key].nunique()) if cross_key else 0
+            # Measure donor-side cardinality for the cross-name key so the comparison
+            # is apples-to-apples: same_card measures left-table values, so we use the
+            # donor table's cross_donor_key cardinality (same entity set, correct side).
+            cross_card       = int(donor[cross_donor_key].nunique()) if cross_donor_key else 0
 
             cross_rename: "str | None" = None
             if cross_key and cross_card > same_card:
@@ -1289,11 +1292,11 @@ def _generate_insights(kpi_summaries: list[dict], time_series: list[dict]) -> li
         prev = values[-2]
         first = values[0]
 
-        if prev == 0:
+        if abs(prev) < 1e-6:
             continue
 
         pct_change = (last - prev) / abs(prev) * 100
-        overall_change = (last - first) / abs(first) * 100 if first != 0 else 0
+        overall_change = (last - first) / abs(first) * 100 if abs(first) >= 1e-6 else 0
 
         # H11: Use stored format rather than heuristic "/" check to avoid double-multiplying
         # data already stored as 0-100 percentages (e.g. a "percent_resolved" column).

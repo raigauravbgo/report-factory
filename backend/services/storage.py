@@ -14,10 +14,18 @@ def _use_local() -> bool:
     return not settings.aws_access_key_id or settings.app_env == "development"
 
 
+def _safe_local_path(s3_key: str) -> Path:
+    """Resolve s3_key relative to the upload dir and reject path-traversal attempts."""
+    resolved = (_LOCAL_UPLOAD_DIR / s3_key).resolve()
+    if not str(resolved).startswith(str(_LOCAL_UPLOAD_DIR.resolve())):
+        raise ValueError(f"Unsafe path rejected: {s3_key!r}")
+    return resolved
+
+
 def upload_file(file_obj: BinaryIO, s3_key: str) -> str:
     """Upload a file-like object. Returns the S3 key (or local path key)."""
     if _use_local():
-        dest = _LOCAL_UPLOAD_DIR / s3_key
+        dest = _safe_local_path(s3_key)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(file_obj.read())
         return s3_key
@@ -39,7 +47,7 @@ def upload_file(file_obj: BinaryIO, s3_key: str) -> str:
 def download_bytes(s3_key: str) -> bytes:
     """Download a stored file and return its raw bytes."""
     if _use_local():
-        return (_LOCAL_UPLOAD_DIR / s3_key).read_bytes()
+        return _safe_local_path(s3_key).read_bytes()
 
     client = boto3.client(
         "s3",

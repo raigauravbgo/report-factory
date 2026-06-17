@@ -132,8 +132,7 @@ def _probe_value_overlap(
             return df
         except Exception as exc:
             logger.debug("_probe_value_overlap: could not load %s: %s", tname, exc)
-            sample_cache[tname] = None
-            return None
+            return None  # Don't cache failures — allow retry if called again
 
     for i, fa in enumerate(file_profiles):
         for j, fb in enumerate(file_profiles):
@@ -179,7 +178,9 @@ def _probe_value_overlap(
                     already_seen.add((fa.filename, col_a, fb.filename, col_b))
                     already_seen.add((fb.filename, col_b, fa.filename, col_a))
 
-                    confidence = round(min(overlap, 1.0) * 0.9, 2)
+                    # Value-overlap is reliable but slightly less certain than name matching;
+                    # cap at 0.95 so a perfect overlap scores just below a perfect name match.
+                    confidence = round(min(overlap, 0.95), 2)
                     result.append(RelationshipSuggestion(
                         file_a=fa.filename,
                         col_a=col_a,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ColumnTable from "@/components/ColumnTable";
 import SchemaRelationships from "@/components/SchemaRelationships";
 import { api } from "@/lib/api";
@@ -33,7 +33,8 @@ export default function SchemaPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [navigating, setNavigating] = useState(false);
-  const [sheetChanging, setSheetChanging] = useState(false); // M3: prevent concurrent sheet changes
+  const [sheetChanging, setSheetChanging] = useState(false);
+  const sheetChangingRef = useRef(false); // synchronous guard; state alone has async update lag
   const [relationships, setRelationships] = useState<RelationshipSuggestion[]>([]);
   const [relLoading, setRelLoading] = useState(false);
   const [vdBuilding, setVdBuilding] = useState(false);
@@ -193,8 +194,8 @@ export default function SchemaPage() {
 
   async function handleSheetChange(sheet: string) {
     const tab = tabs[activeTab];
-    // M3: Guard against concurrent requests from rapid sheet changes
-    if (!tab || sheetChanging) return;
+    if (!tab || sheetChangingRef.current) return;
+    sheetChangingRef.current = true;
     setSheetChanging(true);
     try {
       const updated = await api.saveSchemaOverrides(tab.uploadId, {
@@ -205,7 +206,10 @@ export default function SchemaPage() {
         prev.map((t, i) => (i === activeTab ? { ...t, profile: updated } : t)),
       );
     } catch { /* ignore */ }
-    finally { setSheetChanging(false); }
+    finally {
+      sheetChangingRef.current = false;
+      setSheetChanging(false);
+    }
   }
 
   async function handleBuildVirtualDimension() {

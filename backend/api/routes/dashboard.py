@@ -32,23 +32,30 @@ def list_dashboards(db: Session = Depends(get_db)):
         .order_by(ReportRecipe.created_at.desc())
         .all()
     )
+
+    # Prefetch all uploads for all dataset IDs in a single query (avoid N+1)
+    dataset_ids = {
+        r.dataset_id or (r.config or {}).get("dataset_id")
+        for r in recipes
+    }
+    dataset_ids.discard(None)
+    uploads_by_dataset: dict[int, list[str]] = {}
+    if dataset_ids:
+        for u in (
+            db.query(Upload)
+            .filter(
+                Upload.dataset_id.in_(dataset_ids),
+                Upload.filename != "__virtual_dimension__",
+            )
+            .all()
+        ):
+            uploads_by_dataset.setdefault(u.dataset_id, []).append(u.filename)
+
     result = []
     for r in recipes:
         cfg = r.config or {}
         dataset_id = r.dataset_id or cfg.get("dataset_id")
-
-        # Collect file names for this dataset (skip virtual dimension)
-        filenames: list[str] = []
-        if dataset_id:
-            uploads = (
-                db.query(Upload)
-                .filter(
-                    Upload.dataset_id == dataset_id,
-                    Upload.filename != "__virtual_dimension__",
-                )
-                .all()
-            )
-            filenames = [u.filename for u in uploads]
+        filenames = uploads_by_dataset.get(dataset_id, []) if dataset_id else []
 
         kpi_names = [k.get("name", "") for k in cfg.get("kpis", [])]
 
@@ -499,7 +506,7 @@ def export_excel(recipe_id: int, db: Session = Depends(get_db)):
 
     for kpi in result["kpi_summaries"]:
         val = kpi["value"]
-        if val is not None and "/" in kpi["formula"]:
+        if val is not None and (kpi.get("format") or "").lower() == "percentage":
             val = f"{val * 100:.1f}%"
         elif val is not None:
             val = round(val, 2)

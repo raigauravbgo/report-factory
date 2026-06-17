@@ -13,7 +13,8 @@ def chat_complete(
 
     if provider == "anthropic":
         return _anthropic_complete(messages, temperature, json_mode)
-    elif provider == "azure" or settings.use_azure_openai:
+    elif provider == "azure" or (provider not in ("openai", "anthropic") and settings.use_azure_openai):
+        # Explicit LLM_PROVIDER=openai takes priority over USE_AZURE_OPENAI flag
         return _azure_openai_complete(messages, temperature, json_mode)
     else:
         return _openai_complete(messages, temperature, json_mode)
@@ -29,6 +30,8 @@ def _openai_complete(messages: list[dict], temperature: float, json_mode: bool) 
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     resp = client.chat.completions.create(**kwargs)
+    if not resp.choices:
+        raise ValueError("OpenAI returned an empty choices list")
     return resp.choices[0].message.content or ""
 
 
@@ -46,6 +49,8 @@ def _azure_openai_complete(messages: list[dict], temperature: float, json_mode: 
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     resp = client.chat.completions.create(**kwargs)
+    if not resp.choices:
+        raise ValueError("Azure OpenAI returned an empty choices list")
     return resp.choices[0].message.content or ""
 
 
@@ -74,4 +79,6 @@ def _anthropic_complete(messages: list[dict], temperature: float, json_mode: boo
         messages=filtered,
         temperature=temperature,
     )
+    if not resp.content:
+        raise ValueError("Anthropic returned an empty content list")
     return resp.content[0].text
