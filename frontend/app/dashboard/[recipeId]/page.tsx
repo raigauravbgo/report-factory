@@ -1,10 +1,12 @@
 "use client";
 
+import React from "react";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  AreaChart, Area, BarChart, Bar,
+  AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Brush, LabelList,
+  ReferenceLine,
 } from "recharts";
 import { api } from "@/lib/api";
 import { logEvent } from "@/lib/logger";
@@ -14,27 +16,17 @@ import ChartCard from "@/components/ui/ChartCard";
 import SectionHeader from "@/components/ui/SectionHeader";
 import InsightPanel from "@/components/ui/InsightPanel";
 import FilterBar from "@/components/filters/FilterBar";
-import type { RecipeConfig } from "@/lib/types";
+import type { DashboardData, DashboardInsight, DataQuality } from "@/lib/types";
 
-interface KpiSummary { name: string; value: number | null; formula: string; format?: string }
+// Classic-view local types
 interface TimeSeriesPoint { date: string; value: number }
 interface BreakdownPoint { label: string; value: number }
 interface TimeSeries { kpi: string; data: TimeSeriesPoint[] }
 interface Breakdown { kpi: string; dimension: string; data: BreakdownPoint[] }
-interface Insight { severity: "critical"|"high"|"medium"|"low"; headline: string; finding: string; action?: string }
-
-interface DashboardData {
-  recipe_id: number;
-  config: RecipeConfig;
-  kpi_summaries: KpiSummary[];
-  time_series: TimeSeries[];
-  breakdown: Breakdown[];
-  insights: Insight[];
-  generated_at: string;
-}
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const COLORS = ["#3B82F6", "#8B5CF6", "#10B981", "#F59E0B", "#EF4444"];
+const CHART_COLORS = ["#3B82F6", "#8B5CF6", "#10B981", "#F59E0B", "#EF4444"];
 
 const CHART_TOOLTIP_STYLE = {
   backgroundColor: "#FFFFFF",
@@ -47,11 +39,11 @@ const CHART_TOOLTIP_STYLE = {
 const CHART_LABEL_STYLE = { color: "#8B97B0", fontSize: "10px" };
 
 // M4: Error boundary catches Recharts crashes so one bad chart doesn't take down the page
-class ChartErrorBoundary extends (require("react") as typeof import("react")).Component<
-  { children: import("react").ReactNode },
+class ChartErrorBoundary extends React.Component<
+  { children: React.ReactNode },
   { hasError: boolean }
 > {
-  constructor(props: { children: import("react").ReactNode }) {
+  constructor(props: { children: React.ReactNode }) {
     super(props);
     this.state = { hasError: false };
   }
@@ -153,7 +145,7 @@ function TrendChart({ ts, formula, fmt, color, zoom, onZoomIn, onZoomOut, onRese
               endIndex={safeEnd}
               stroke="#C8D2E8"
               fill="#F8F9FD"
-              travellerStyle={{ fill: "#C8D2E8", strokeWidth: 0 }}
+
               onChange={({ startIndex, endIndex }) =>
                 onBrushChange(
                   Number.isFinite(startIndex) ? startIndex! : 0,
@@ -168,6 +160,810 @@ function TrendChart({ ts, formula, fmt, color, zoom, onZoomIn, onZoomOut, onRese
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ENHANCED VIEW — constants, helpers, and components
+// ══════════════════════════════════════════════════════════════════════════════
+
+type TabId = "overview" | "trends" | "drivers" | "actions";
+
+const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: "overview", label: "Overview",  icon: "📊" },
+  { id: "trends",   label: "Trends",    icon: "📈" },
+  { id: "drivers",  label: "Drivers",   icon: "🔍" },
+  { id: "actions",  label: "Actions",   icon: "⚡" },
+];
+
+const SEV_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+const STATUS_TOP: Record<string, string> = {
+  good:    "border-t-emerald-500",
+  warning: "border-t-amber-500",
+  risk:    "border-t-red-500",
+  neutral: "border-t-slate-300",
+};
+const STATUS_VAL2: Record<string, string> = {
+  good:    "text-emerald-700",
+  warning: "text-amber-700",
+  risk:    "text-red-700",
+  neutral: "text-slate-800",
+};
+const STATUS_BADGE2: Record<string, string> = {
+  good:    "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  warning: "bg-amber-50 text-amber-700 ring-amber-200",
+  risk:    "bg-red-50 text-red-700 ring-red-200",
+  neutral: "bg-slate-100 text-slate-500 ring-slate-200",
+};
+const STATUS_INTERP: Record<string, string> = {
+  good:    "bg-emerald-50 border-l-emerald-300",
+  warning: "bg-amber-50 border-l-amber-300",
+  risk:    "bg-red-50 border-l-red-300",
+  neutral: "bg-slate-50 border-l-slate-200",
+};
+const SPARK_COLOR: Record<string, string> = {
+  good: "#16a34a", warning: "#d97706", risk: "#dc2626", neutral: "#94a3b8",
+};
+const SEV_BANNER: Record<string, { border: string; label: string; icon: string }> = {
+  critical: { border: "border-l-red-600",    label: "text-red-600",    icon: "🔴" },
+  high:     { border: "border-l-red-400",    label: "text-red-500",    icon: "🟠" },
+  medium:   { border: "border-l-amber-400",  label: "text-amber-600",  icon: "🟡" },
+  low:      { border: "border-l-emerald-400",label: "text-emerald-600",icon: "🟢" },
+};
+const PRIORITY_STYLE: Record<string, { dot: string; text: string }> = {
+  critical: { dot: "bg-red-600",    text: "text-red-600"    },
+  high:     { dot: "bg-orange-500", text: "text-orange-600" },
+  medium:   { dot: "bg-amber-500",  text: "text-amber-700"  },
+  low:      { dot: "bg-slate-400",  text: "text-slate-500"  },
+};
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function getInsightForKpi(
+  insights: DashboardInsight[],
+  kpiName: string,
+): DashboardInsight | undefined {
+  const lower = kpiName.toLowerCase();
+  // Prefer synthetic summary insights (headline: "<KPI Name> at <value>")
+  const synthetic = insights.find((ins) => {
+    const h = ins.headline.toLowerCase();
+    return h.startsWith(lower) && / at \d/.test(ins.headline);
+  });
+  return synthetic ?? insights.find((ins) => ins.headline.toLowerCase().includes(lower));
+}
+
+
+function deltaClass(delta: number | null, direction: string): string {
+  if (delta === null) return "text-slate-400";
+  const up = delta >= 0;
+  const good = direction === "lower_is_better" ? !up : up;
+  return good ? "text-emerald-600" : "text-red-600";
+}
+
+function dashboardTitle(kpis: Array<{ name: string }>): string {
+  if (!kpis.length) return "Dashboard";
+  const s = kpis.map((k) => k.name.replace(/_/g, " ")).join(" · ");
+  return s.length > 40 ? s.slice(0, 37) + "…" : s;
+}
+
+// ── SparkLine ─────────────────────────────────────────────────────────────────
+
+function SparkLine({ values, color }: { values: number[]; color: string }) {
+  if (values.length < 2) return null;
+  const W = 80, H = 24;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = values.map((v, i) => ({
+    x: (i / (values.length - 1)) * W,
+    y: H - ((v - min) / range) * (H - 6) - 3,
+  }));
+  const pts = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  return (
+    <svg viewBox="0 0 80 24" className="w-full h-8 mt-2" preserveAspectRatio="none">
+      <polyline
+        points={pts}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {points.map((p, i) => (
+        <circle key={i} cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r="2.5" fill={color} />
+      ))}
+    </svg>
+  );
+}
+
+// ── EnhancedSectionHeading ────────────────────────────────────────────────────
+
+function EnhancedSectionHeading({
+  children,
+  right,
+}: {
+  children: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3 mb-3">
+      <h2 className="text-[9px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">
+        {children}
+      </h2>
+      <div className="flex-1 border-t border-slate-200" />
+      {right}
+    </div>
+  );
+}
+
+// ── TabBar ────────────────────────────────────────────────────────────────────
+
+function TabBar({
+  active,
+  onChange,
+  actionCount,
+}: {
+  active: TabId;
+  onChange: (id: TabId) => void;
+  actionCount: number;
+}) {
+  return (
+    <div className="bg-white border-b border-slate-200 flex overflow-x-auto">
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => onChange(t.id)}
+          className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0
+            ${active === t.id
+              ? "border-blue-600 text-blue-600"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+            }`}
+        >
+          <span>{t.icon}</span>
+          {t.label}
+          {t.id === "actions" && actionCount > 0 && (
+            <span className="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
+              {actionCount}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── InsightAside ──────────────────────────────────────────────────────────────
+
+function InsightAside({ insight }: { insight: DashboardInsight }) {
+  return (
+    <div className="bg-slate-50 rounded-xl p-3 flex flex-col gap-2 border border-slate-200">
+      <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+        📌 Insight
+      </div>
+      {(["finding", "driver", "impact", "action"] as const).map((key) => {
+        const val = insight[key];
+        if (!val) return null;
+        return (
+          <div key={key} className="flex flex-col gap-0.5">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+              {key}
+            </span>
+            <span className="text-[11px] text-slate-700 leading-relaxed">{val}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── DriverBarsSection ─────────────────────────────────────────────────────────
+
+function DriverBarsSection({
+  dim,
+  kpiName,
+  breakdown,
+}: {
+  dim: string;
+  kpiName: string;
+  breakdown: Array<{ name: string; value: number }>;
+}) {
+  if (!breakdown.length) return null;
+  const avg = breakdown.reduce((s, r) => s + r.value, 0) / breakdown.length;
+  const maxVal = Math.max(...breakdown.map((r) => r.value));
+  const bottom = breakdown[breakdown.length - 1];
+  const gap = (maxVal - bottom.value).toFixed(1);
+  const title = `${kpiName.replace(/_/g, " ")} by ${dim} — ${breakdown[0].name} leads at ${maxVal.toFixed(1)}`;
+  const subtitle = `Average: ${avg.toFixed(1)} · ${breakdown.length} segments · Gap: ${gap}`;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-3">
+      <div className="text-xs font-bold text-slate-800 mb-0.5 leading-snug">{title}</div>
+      <div className="text-[10px] text-slate-400 mb-2">{subtitle}</div>
+      <div className="overflow-y-auto max-h-56">
+        {breakdown.map((row) => {
+          const pct = maxVal > 0 ? (row.value / maxVal) * 100 : 0;
+          const above = row.value >= avg;
+          return (
+            <div
+              key={row.name}
+              className="grid items-center gap-2 py-1 border-b border-slate-50 last:border-0"
+              style={{ gridTemplateColumns: "120px 1fr 48px" }}
+            >
+              <span className="text-[10px] text-slate-600 font-medium truncate" title={row.name}>
+                {row.name}
+              </span>
+              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${above ? "bg-emerald-500" : "bg-red-400"}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className={`text-[10px] font-bold text-right ${above ? "text-emerald-700" : "text-red-600"}`}>
+                {row.value.toFixed(1)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── ActionTable ───────────────────────────────────────────────────────────────
+
+function ActionTable({ insights }: { insights: DashboardInsight[] }) {
+  const sorted = [...insights].sort(
+    (a, b) => (SEV_ORDER[a.severity] ?? 3) - (SEV_ORDER[b.severity] ?? 3),
+  );
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="bg-slate-50 border-b border-slate-200">
+            {["Priority", "Action", "Expected Impact", "Owner"].map((h) => (
+              <th
+                key={h}
+                className="text-left text-[9px] font-bold uppercase tracking-widest text-slate-400 px-3 py-2"
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((ins, i) => {
+            const p = PRIORITY_STYLE[ins.severity] ?? PRIORITY_STYLE.low;
+            return (
+              <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors">
+                <td className="px-3 py-2 w-20">
+                  <span className={`flex items-center gap-1.5 text-[10px] font-bold capitalize ${p.text}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${p.dot}`} />
+                    {ins.severity}
+                  </span>
+                </td>
+                <td className="px-3 py-2">
+                  <div className="text-xs font-semibold text-slate-900 mb-0.5">{ins.action ?? ins.headline}</div>
+                  <div className="text-[10px] text-slate-500 leading-relaxed">{ins.finding}</div>
+                </td>
+                <td className="px-3 py-2 text-[10px] text-slate-700 w-32">{ins.impact}</td>
+                <td className="px-3 py-2 text-[10px] text-slate-400 w-24">—</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── RootCauseCards ────────────────────────────────────────────────────────────
+
+function RootCauseCards({ insights }: { insights: DashboardInsight[] }) {
+  const top3 = [...insights]
+    .sort((a, b) => (SEV_ORDER[a.severity] ?? 3) - (SEV_ORDER[b.severity] ?? 3))
+    .slice(0, 3);
+  const BORDERS = ["border-l-red-500", "border-l-amber-400", "border-l-slate-300"] as const;
+  const LABELS  = ["text-red-600",     "text-amber-600",     "text-slate-400"]     as const;
+  return (
+    <div className={`grid gap-4 ${
+      top3.length === 1 ? "grid-cols-1" :
+      top3.length === 2 ? "grid-cols-1 md:grid-cols-2" :
+      "grid-cols-1 md:grid-cols-3"
+    }`}>
+      {top3.map((ins, i) => (
+        <div
+          key={i}
+          className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 border-l-4 ${BORDERS[i] ?? BORDERS[2]}`}
+        >
+          <div className={`text-[9px] font-bold uppercase tracking-widest mb-1.5 ${LABELS[i] ?? LABELS[2]}`}>
+            Root Cause #{i + 1}
+          </div>
+          <div className="text-xs font-bold text-slate-900 mb-1.5 leading-snug">{ins.headline}</div>
+          <div className="text-[10px] text-slate-600 leading-relaxed">{ins.driver || ins.finding}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── ExecutiveBanner ───────────────────────────────────────────────────────────
+
+function ExecutiveBanner({ insights }: { insights: DashboardInsight[] }) {
+  if (!insights.length) return null;
+  const top =
+    insights.find((i) => i.severity === "critical" || i.severity === "high") ?? insights[0];
+  const cfg = SEV_BANNER[top.severity] ?? SEV_BANNER.low;
+  return (
+    <div className={`border-l-4 bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 mb-4 ${cfg.border}`}>
+      <div className="flex items-start gap-2.5">
+        <span className="text-base flex-shrink-0 mt-0.5">{cfg.icon}</span>
+        <div className="flex-1 min-w-0">
+          <div className={`text-[9px] font-bold uppercase tracking-widest mb-0.5 ${cfg.label}`}>
+            {top.severity}
+          </div>
+          <div className="text-sm font-bold text-slate-900 mb-1 leading-snug">{top.headline}</div>
+          <div className="text-xs text-slate-600 leading-relaxed mb-2">{top.finding}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {top.driver && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-amber-50 text-amber-800">
+                Driver: {top.driver}
+              </span>
+            )}
+            {top.impact && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-red-50 text-red-800">
+                Impact: {top.impact}
+              </span>
+            )}
+            {top.action && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-800">
+                Action: {top.action}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── EnhancedMetricTile ────────────────────────────────────────────────────────
+
+function EnhancedMetricTile({
+  metric,
+  insight,
+  sparkValues,
+}: {
+  metric: import("@/lib/types").DashboardMetric;
+  insight?: DashboardInsight;
+  sparkValues: number[];
+}) {
+  const hasDelta = metric.delta !== null && metric.delta_pct !== null;
+  const up = (metric.delta ?? 0) >= 0;
+  const dColor  = deltaClass(metric.delta, metric.direction);
+  const topBorder = STATUS_TOP[metric.status]   ?? STATUS_TOP.neutral;
+  const valColor  = STATUS_VAL2[metric.status]  ?? STATUS_VAL2.neutral;
+  const badgeCls  = STATUS_BADGE2[metric.status] ?? STATUS_BADGE2.neutral;
+  const interpCls = STATUS_INTERP[metric.status] ?? STATUS_INTERP.neutral;
+  const sparkCol  = SPARK_COLOR[metric.status]   ?? SPARK_COLOR.neutral;
+  const statusLabel =
+    metric.status === "risk"
+      ? "At Risk"
+      : metric.status.charAt(0).toUpperCase() + metric.status.slice(1);
+
+  return (
+    <div className={`bg-white rounded-xl border border-slate-200 shadow-sm p-3 border-t-4 ${topBorder} hover:shadow-md transition-shadow`}>
+      <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 truncate">
+        {metric.name.replace(/_/g, " ")}
+      </div>
+      <div className="flex items-baseline gap-1.5 mb-1">
+        <span className={`text-2xl font-extrabold tabular-nums leading-none ${valColor}`}>
+          {metric.value % 1 === 0 ? metric.value : metric.value.toFixed(1)}
+        </span>
+        {hasDelta && (
+          Math.abs(metric.delta_pct!) < 0.05
+            ? <span className="text-[10px] font-medium text-slate-400">No change</span>
+            : <span className={`text-xs font-bold ${dColor}`}>
+                {up ? "▲" : "▼"} {Math.abs(metric.delta_pct!).toFixed(1)}%
+              </span>
+        )}
+      </div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ring-1 ring-inset capitalize ${badgeCls}`}>
+          {statusLabel}
+        </span>
+        <span className="text-[9px] text-slate-400">{metric.period ?? ""}</span>
+      </div>
+      {metric.prior_value !== null && (
+        <div className="text-[10px] text-slate-400 mb-1.5">
+          Prior: {metric.prior_value.toFixed(1)}
+        </div>
+      )}
+      {insight && (
+        <div className={`text-[10px] leading-relaxed p-2 rounded-lg border-l-4 ${interpCls}`}>
+          {insight.finding}
+        </div>
+      )}
+      {sparkValues.length >= 2 && <SparkLine values={sparkValues} color={sparkCol} />}
+      <div className="text-[9px] text-slate-300 mt-1">{metric.count.toLocaleString()} records</div>
+    </div>
+  );
+}
+
+// ── EnhancedFreshnessStrip ────────────────────────────────────────────────────
+
+function EnhancedFreshnessStrip({
+  dq,
+  generatedAt,
+  rowCount,
+}: {
+  dq: DataQuality;
+  generatedAt: string;
+  rowCount: number;
+}) {
+  const time = new Date(generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const items = [
+    dq.date_coverage && `Coverage: ${dq.date_coverage}`,
+    dq.most_recent_date && `Latest: ${dq.most_recent_date}`,
+    `${rowCount.toLocaleString()} rows`,
+    `Refreshed ${time}`,
+  ].filter(Boolean) as string[];
+  const ok = dq.status === "ok";
+  return (
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-0.5 px-6 py-2 text-[11px] border-b ${
+      ok ? "bg-white text-slate-400 border-slate-200" : "bg-amber-50 text-amber-700 border-amber-200"
+    }`}>
+      <span className={`w-2 h-2 rounded-full shrink-0 ${ok ? "bg-emerald-500" : "bg-amber-500"}`} />
+      {items.map((s) => <span key={s}>{s}</span>)}
+      {dq.warnings.map((w, i) => (
+        <span key={i} className="font-semibold">⚠ {w}</span>
+      ))}
+    </div>
+  );
+}
+
+// ── EnhancedHeader ────────────────────────────────────────────────────────────
+
+function EnhancedHeader({
+  data,
+  view,
+  onViewChange,
+  onEditRecipe,
+}: {
+  data: DashboardData;
+  view: "classic" | "enhanced";
+  onViewChange: (v: "classic" | "enhanced") => void;
+  onEditRecipe: () => void;
+}) {
+  const title = dashboardTitle(data.config.kpis);
+  const subtitle = [
+    data.data_quality?.date_coverage,
+    `${(data.row_count ?? 0).toLocaleString()} records`,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <header className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between gap-4">
+      <div className="flex items-center gap-4 min-w-0">
+        <span className="text-[13px] font-bold tracking-widest text-blue-300 uppercase shrink-0">BGO AI</span>
+        <div className="w-px h-6 bg-slate-700 shrink-0" />
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold leading-tight truncate">{title}</div>
+          {subtitle && <div className="text-[11px] text-slate-400 leading-tight truncate">{subtitle}</div>}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${
+          data.approved
+            ? "bg-emerald-950 text-emerald-400 border-emerald-700"
+            : "bg-amber-950 text-amber-400 border-amber-700"
+        }`}>
+          {data.approved ? "✓ Approved" : "Draft"}
+        </span>
+        <div className="flex rounded-lg border border-slate-600 overflow-hidden text-xs">
+          {(["classic", "enhanced"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => onViewChange(v)}
+              className={`px-3 py-1.5 font-medium capitalize transition-colors ${
+                view === v
+                  ? "bg-blue-600 text-white"
+                  : "text-slate-400 hover:text-white hover:bg-slate-700"
+              }`}
+            >
+              {v === "classic" ? "Classic" : "Enhanced ✦"}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={onEditRecipe}
+          className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+        >
+          ✏ Edit recipe
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// ── EnhancedDashboard ─────────────────────────────────────────────────────────
+
+interface EnhancedDashboardProps {
+  data: DashboardData;
+  filterOptions: Record<string, string[]>;
+  activeFilters: Record<string, string>;
+  filtering: boolean;
+  view: "classic" | "enhanced";
+  onViewChange: (v: "classic" | "enhanced") => void;
+  onFilterChange: (col: string, val: string) => void;
+  onEditRecipe: () => void;
+}
+
+function EnhancedDashboard({
+  data, filterOptions, activeFilters, filtering,
+  view, onViewChange, onFilterChange, onEditRecipe,
+}: EnhancedDashboardProps) {
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [showAllDims, setShowAllDims] = useState(false);
+
+  const insightFor = (kpiName: string) => getInsightForKpi(data.insights, kpiName);
+  const sparkFor = (kpiName: string): number[] =>
+    (data.time_series_dict?.[kpiName] ?? []).slice(-5).map((p) => p.value);
+  const highSeverityCount = data.insights.filter(
+    (i) => i.severity === "critical" || i.severity === "high",
+  ).length;
+
+  return (
+    <div className="bg-slate-50 min-h-screen">
+      {/* Sticky header block */}
+      <div className="sticky top-0 z-40">
+        <EnhancedHeader
+          data={data}
+          view={view}
+          onViewChange={onViewChange}
+          onEditRecipe={onEditRecipe}
+        />
+        {data.data_quality && (
+          <EnhancedFreshnessStrip
+            dq={data.data_quality}
+            generatedAt={data.generated_at}
+            rowCount={data.row_count ?? 0}
+          />
+        )}
+        <TabBar active={activeTab} onChange={setActiveTab} actionCount={highSeverityCount} />
+      </div>
+
+      {/* Page content */}
+      <div className="max-w-6xl mx-auto px-6 py-6">
+        {/* Filter bar — all tabs */}
+        {Object.keys(filterOptions).length > 0 && (
+          <div className="mb-6">
+            <FilterBar
+              dimensions={data.config.dimensions ?? []}
+              filters={data.config.filters ?? []}
+              activeFilters={activeFilters}
+              filterOptions={filterOptions}
+              onFilterChange={onFilterChange}
+            />
+          </div>
+        )}
+        {filtering && (
+          <div className="flex items-center gap-2 text-xs text-blue-600 mb-4">
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+            Updating…
+          </div>
+        )}
+
+        {/* ── Overview tab ── */}
+        {activeTab === "overview" && (
+          <div>
+            <ExecutiveBanner insights={data.insights} />
+
+            {data.metrics.length > 0 && (
+              <section className="mb-5">
+                <EnhancedSectionHeading>KPI Scorecards</EnhancedSectionHeading>
+                <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(185px, 1fr))" }}>
+                  {data.metrics.map((m) => (
+                    <EnhancedMetricTile
+                      key={m.id}
+                      metric={m}
+                      insight={insightFor(m.name)}
+                      sparkValues={sparkFor(m.name)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {Object.keys(data.time_series_dict ?? {}).length > 0 && (
+              <section>
+                <EnhancedSectionHeading
+                  right={
+                    <button
+                      onClick={() => setActiveTab("trends")}
+                      className="text-xs text-blue-600 hover:underline shrink-0"
+                    >
+                      View full trends →
+                    </button>
+                  }
+                >
+                  Trend Snapshot
+                </EnhancedSectionHeading>
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {Object.entries(data.time_series_dict).map(([kpiName, series], i) => {
+                    const ins = insightFor(kpiName);
+                    const avg = series.length ? series.reduce((s, p) => s + p.value, 0) / series.length : null;
+                    const metricVal = data.metrics.find((m) => m.name === kpiName)?.value;
+                    return (
+                      <div key={kpiName} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500 truncate pr-2">
+                            {kpiName.replace(/_/g, " ")}
+                          </span>
+                          {metricVal !== undefined && (
+                            <span className="text-sm font-extrabold text-slate-900 tabular-nums flex-shrink-0">
+                              {metricVal % 1 === 0 ? metricVal : metricVal.toFixed(1)}
+                            </span>
+                          )}
+                        </div>
+                        {ins && (
+                          <div className="text-[10px] text-slate-400 mb-3 leading-relaxed">{ins.finding}</div>
+                        )}
+                        <ResponsiveContainer width="100%" height={150}>
+                          <LineChart data={series} margin={{ top: 6, right: 6, bottom: 0, left: -8 }}>
+                            <CartesianGrid strokeDasharray="2 4" stroke="#f1f5f9" />
+                            <XAxis dataKey="period" tick={{ fontSize: 9, fill: "#94a3b8" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                            <YAxis tick={{ fontSize: 9, fill: "#94a3b8" }} tickLine={false} axisLine={false} width={40} />
+                            <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(0,0,0,.06)" }} itemStyle={{ color: "#334155" }} />
+                            {avg !== null && <ReferenceLine y={avg} stroke="#cbd5e1" strokeDasharray="3 3" />}
+                            <Line type="monotone" dataKey="value" stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2.5} dot={{ r: 3, strokeWidth: 0, fill: CHART_COLORS[i % CHART_COLORS.length] }} activeDot={{ r: 5, strokeWidth: 0, fill: CHART_COLORS[i % CHART_COLORS.length] }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+
+        {/* ── Trends tab ── */}
+        {activeTab === "trends" && (
+          <div>
+            {Object.keys(data.time_series_dict ?? {}).length === 0 ? (
+              <div className="text-center py-16 text-slate-400 text-sm">
+                No trend data available. Ensure your recipe includes a date column and at least two time periods.
+              </div>
+            ) : (
+              Object.entries(data.time_series_dict).map(([kpiName, series], i) => {
+                const ins = insightFor(kpiName);
+                const avg = series.length ? series.reduce((s, p) => s + p.value, 0) / series.length : null;
+                const metricVal = data.metrics.find((m) => m.name === kpiName)?.value;
+                return (
+                  <div key={kpiName} className="flex gap-4 mb-5 items-start">
+                    <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500 truncate pr-2">
+                          {kpiName.replace(/_/g, " ")}
+                        </span>
+                        {metricVal !== undefined && (
+                          <span className="text-sm font-extrabold text-slate-900 tabular-nums flex-shrink-0">
+                            {metricVal % 1 === 0 ? metricVal : metricVal.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                      {ins && <div className="text-[10px] text-slate-400 mb-3 leading-relaxed">{ins.finding}</div>}
+                      <ResponsiveContainer width="100%" height={170}>
+                        <LineChart data={series} margin={{ top: 6, right: 6, bottom: 0, left: -8 }}>
+                          <CartesianGrid strokeDasharray="2 4" stroke="#f1f5f9" />
+                          <XAxis dataKey="period" tick={{ fontSize: 9, fill: "#94a3b8" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                          <YAxis tick={{ fontSize: 9, fill: "#94a3b8" }} tickLine={false} axisLine={false} width={40} />
+                          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(0,0,0,.06)" }} itemStyle={{ color: "#334155" }} />
+                          {avg !== null && <ReferenceLine y={avg} stroke="#cbd5e1" strokeDasharray="3 3" />}
+                          <Line type="monotone" dataKey="value" stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2.5} dot={{ r: 3, strokeWidth: 0, fill: CHART_COLORS[i % CHART_COLORS.length] }} activeDot={{ r: 5, strokeWidth: 0, fill: CHART_COLORS[i % CHART_COLORS.length] }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {ins && <div className="w-52 flex-shrink-0"><InsightAside insight={ins} /></div>}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* ── Drivers tab ── */}
+        {activeTab === "drivers" && (
+          <div>
+            {Object.keys(data.dimension_breakdowns ?? {}).length === 0 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-8 text-center">
+                <div className="text-sm font-semibold text-amber-800 mb-1">No driver data available</div>
+                <div className="text-xs text-amber-600 mb-4">
+                  Add a dimension to your recipe to see breakdowns by team, location, or product.
+                </div>
+                <button
+                  onClick={onEditRecipe}
+                  className="text-xs font-medium px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+                >
+                  Edit recipe
+                </button>
+              </div>
+            ) : (() => {
+              const sortedDims = Object.keys(data.dimension_breakdowns).sort(
+                (a, b) => (data.dimension_spreads?.[b] ?? 0) - (data.dimension_spreads?.[a] ?? 0),
+              );
+              const [topDim, ...remainingDims] = sortedDims;
+
+              const renderDimSection = (dim: string) => (
+                <div key={dim}>
+                  {(data.dimension_spreads?.[dim] ?? 0) < 0.02 && (
+                    <p className="text-xs text-slate-400 italic mb-2 px-1">
+                      No significant variation across segments for <span className="font-medium">{dim}</span>
+                    </p>
+                  )}
+                  <div className="grid gap-3 lg:grid-cols-2 items-start">
+                    {Object.entries(data.dimension_breakdowns[dim]).map(([kpiName, breakdown]) => (
+                      <DriverBarsSection
+                        key={`${dim}-${kpiName}`}
+                        dim={dim}
+                        kpiName={kpiName}
+                        breakdown={breakdown}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+
+              return (
+                <div className="space-y-6">
+                  {renderDimSection(topDim)}
+                  {remainingDims.length > 0 && (
+                    <>
+                      <div className="flex justify-center">
+                        <button
+                          onClick={() => setShowAllDims((v) => !v)}
+                          className="text-xs font-medium px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                        >
+                          {showAllDims
+                            ? "Hide extra dimensions ↑"
+                            : `Show ${remainingDims.length} more dimension${remainingDims.length === 1 ? "" : "s"} ↓`}
+                        </button>
+                      </div>
+                      {showAllDims && (
+                        <div className="space-y-6">
+                          {remainingDims.map((dim) => renderDimSection(dim))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* ── Actions tab ── */}
+        {activeTab === "actions" && (
+          <div>
+            {data.insights.length === 0 ? (
+              <div className="text-center py-16 text-slate-400 text-sm">
+                No insights available for this report. Add dimension data to generate recommendations.
+              </div>
+            ) : (
+              <>
+                <div className="text-xs text-slate-500 mb-4">
+                  {data.insights.length} insight{data.insights.length !== 1 ? "s" : ""} · sorted by priority
+                </div>
+                <ActionTable insights={data.insights} />
+                <EnhancedSectionHeading>Root Cause Summary</EnhancedSectionHeading>
+                <RootCauseCards insights={data.insights} />
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 export default function DashboardPage() {
   const { recipeId } = useParams<{ recipeId: string }>();
   const router = useRouter();
@@ -188,6 +984,16 @@ export default function DashboardPage() {
   const [templateName, setTemplateName] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateSaved, setTemplateSaved] = useState(false);
+  const [view, setView] = useState<"classic" | "enhanced">(() => {
+    if (typeof window === "undefined") return "classic";
+    const stored = localStorage.getItem("bgo_dashboard_view");
+    return (stored === "enhanced" || stored === "classic") ? stored : "classic";
+  });
+
+  const handleViewChange = (v: "classic" | "enhanced") => {
+    setView(v);
+    localStorage.setItem("bgo_dashboard_view", v);
+  };
 
   function getZoom(kpiName: string, dataLength: number) {
     return zoomState[kpiName] ?? { start: 0, end: Math.max(0, dataLength - 1) };
@@ -232,24 +1038,27 @@ export default function DashboardPage() {
     if (activeGranularity) params.set("granularity", activeGranularity);
     const url = `${BASE_URL}/api/dashboard/${recipeId}/data${params.size ? `?${params}` : ""}`;
 
-    setFiltering(true);
-    setFilterError(null);
-    fetch(url)
-      .then((r) => { if (!r.ok) throw new Error(`API ${r.status}`); return r.json() as Promise<DashboardData>; })
-      .then((d) => {
+    void (async () => {
+      setFiltering(true);
+      setFilterError(null);
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`API ${r.status}`);
+        const d = await r.json() as DashboardData;
         setData(d);
         if (!data) {
           setError(null);
           const blankCount = d.kpi_summaries.filter((k) => k.value === null).length;
           logEvent("dashboard_loaded", "dashboard", { kpi_count: d.kpi_summaries.length, blank_count: blankCount }, { recipeId: Number(recipeId) });
         }
-      })
-      .catch((e) => {
+      } catch (e) {
         if (data) setFilterError(String(e));
         else setError(String(e));
-      })
-      .finally(() => { setLoading(false); setFiltering(false); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      } finally {
+        setLoading(false);
+        setFiltering(false);
+      }
+    })();
   }, [recipeId, activeFilters, activeGranularity]);
 
   function handleFilterChange(key: string, value: string) {
@@ -333,6 +1142,23 @@ export default function DashboardPage() {
   );
 
   if (!data) return null;
+
+  // ── Enhanced View ────────────────────────────────────────────────────────────
+  if (view === "enhanced") {
+    return (
+      <EnhancedDashboard
+        data={data}
+        filterOptions={filterOptions}
+        activeFilters={activeFilters}
+        filtering={filtering}
+        view={view}
+        onViewChange={handleViewChange}
+        onFilterChange={(col, val) => setActiveFilters((prev) => ({ ...prev, [col]: val }))}
+        onEditRecipe={() => router.push(`/recipe/${recipeId}`)}
+      />
+    );
+  }
+  // ── Classic View (unchanged below) ──────────────────────────────────────────
 
   const { config, kpi_summaries, time_series, breakdown, insights, generated_at } = data;
 
@@ -482,6 +1308,21 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* View toggle */}
+          <div className="flex rounded-lg border border-rim overflow-hidden text-xs">
+            {(["classic", "enhanced"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => handleViewChange(v)}
+                className={`px-3 py-1.5 font-medium capitalize transition-colors ${
+                  view === v ? "bg-signal text-white" : "bg-raised text-dim hover:text-ink hover:bg-wash"
+                }`}
+              >
+                {v === "classic" ? "Classic" : "Enhanced ✦"}
+              </button>
+            ))}
+          </div>
+
           {/* Granularity toggle */}
           <div className="flex rounded-lg border border-rim overflow-hidden text-[11px] font-semibold">
             {(["daily", "weekly", "monthly"] as const).map((g) => {

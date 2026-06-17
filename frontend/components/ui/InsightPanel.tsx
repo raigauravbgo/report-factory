@@ -6,7 +6,7 @@ interface Insight {
   driver?: string;
   impact?: string;
   decision?: string;
-  action?: string;
+  action?: string | null;
 }
 
 const SEVERITY: Record<string, {

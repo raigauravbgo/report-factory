@@ -274,13 +274,199 @@ def get_dashboard_data(
         time.perf_counter() - t0,
     )
     effective_granularity = granularity or config.get("granularity", "weekly")
+
+    # ── Enhanced View enrichment fields (additive — Classic fields unchanged) ──
+
+    # time_series_dict: Record<kpiName, [{period, value}]>
+    ts_dict: dict = {
+        ts["kpi"]: [{"period": p["date"], "value": p["value"]} for p in ts["data"]]
+        for ts in result.get("time_series", [])
+    }
+
+    # dimension_breakdowns: reshape breakdown array → {dim: {kpiName: [{name, value}]}}
+    dim_breakdowns: dict = {}
+    for bk in result.get("breakdown", []):
+        dim = bk["dimension"]
+        kpi_name = bk["kpi"]
+        if dim not in dim_breakdowns:
+            dim_breakdowns[dim] = {}
+        dim_breakdowns[dim][kpi_name] = [
+            {"name": str(p["label"]), "value": float(p["value"])}
+            for p in bk["data"]
+        ]
+
+    # dimension_spreads: (max - min) / mean per dimension, averaged across KPIs
+    def _spread_for_dim(kpis_data: dict) -> float:
+        kpi_spreads = []
+        for segments in kpis_data.values():
+            values = [s["value"] for s in segments]
+            if len(values) < 2:
+                continue
+            mean_val = sum(values) / len(values)
+            if mean_val == 0:
+                continue
+            kpi_spreads.append((max(values) - min(values)) / mean_val)
+        return sum(kpi_spreads) / len(kpi_spreads) if kpi_spreads else 0.0
+
+    dim_spreads: dict = {
+        dim: round(_spread_for_dim(kpis_data), 4)
+        for dim, kpis_data in dim_breakdowns.items()
+    }
+    dim_breakdowns = dict(
+        sorted(dim_breakdowns.items(), key=lambda x: dim_spreads.get(x[0], 0), reverse=True)
+    )
+
+    # metrics: richer KPI objects with delta, status, direction, prior_value
+    _lower_keywords = {"wait", "handle_time", "aht", "error", "abandon", "escalat",
+                       "delay", "cost", "churn", "attrition", "shrinkage", "overtime"}
+    ts_by_kpi: dict = {ts["kpi"]: ts["data"] for ts in result.get("time_series", [])}
+    metrics: list = []
+    for i, kpi in enumerate(result.get("kpi_summaries", [])):
+        kpi_ts = ts_by_kpi.get(kpi["name"], [])
+        valid_ts = [p for p in kpi_ts if p.get("value") is not None]
+        current_val = kpi["value"]
+        prior_val = valid_ts[-2]["value"] if len(valid_ts) >= 2 else None
+        period_label = valid_ts[-1]["date"] if valid_ts else None
+
+        if current_val is not None and prior_val is not None and prior_val != 0:
+            delta = current_val - prior_val
+            delta_pct = (delta / abs(prior_val)) * 100
+        else:
+            delta = None
+            delta_pct = None
+
+        name_lower = kpi["name"].lower()
+        direction = (
+            "lower_is_better"
+            if any(kw in name_lower for kw in _lower_keywords)
+            else "higher_is_better"
+        )
+
+        if delta is None or delta_pct is None:
+            status = "neutral"
+        else:
+            up = delta >= 0
+            good = (not up) if direction == "lower_is_better" else up
+            abs_pct = abs(delta_pct)
+            if abs_pct < 5:
+                status = "neutral"
+            elif good and abs_pct >= 5:
+                status = "good"
+            elif not good and abs_pct >= 20:
+                status = "risk"
+            else:
+                status = "warning"
+
+        metrics.append({
+            "id": i,
+            "name": kpi["name"],
+            "value": round(float(current_val), 4) if current_val is not None else 0.0,
+            "delta": round(float(delta), 4) if delta is not None else None,
+            "delta_pct": round(float(delta_pct), 2) if delta_pct is not None else None,
+            "status": status,
+            "direction": direction,
+            "prior_value": round(float(prior_val), 4) if prior_val is not None else None,
+            "count": len(valid_ts),
+            "period": period_label,
+            "formula": kpi["formula"],
+            "format": kpi.get("format", ""),
+        })
+
+    # data_quality: derive from time_series coverage
+    all_dates = sorted({
+        p["date"]
+        for ts in result.get("time_series", [])
+        for p in ts["data"]
+        if p.get("date")
+    })
+    dq_warnings: list[str] = []
+    blank_kpis = [k["name"] for k in result.get("kpi_summaries", []) if k.get("value") is None]
+    if blank_kpis:
+        dq_warnings.append(f"No data for: {', '.join(blank_kpis)}")
+    data_quality = {
+        "status": "warning" if dq_warnings else "ok",
+        "date_coverage": f"{all_dates[0]} to {all_dates[-1]}" if len(all_dates) >= 2 else (all_dates[0] if all_dates else None),
+        "most_recent_date": all_dates[-1] if all_dates else None,
+        "warnings": dq_warnings,
+    }
+
+    # row_count: quick COUNT(*) from staging tables
+    from sqlalchemy import text as _sql_text
+    row_count = 0
+    try:
+        for tname in all_table_names:
+            row_count += db.execute(_sql_text(f'SELECT COUNT(*) FROM "{tname}"')).scalar() or 0
+    except Exception:
+        row_count = sum(len(ts["data"]) for ts in result.get("time_series", []))
+
+    # approved flag
+    approved = recipe.approved_at is not None
+
+    # insights enriched with driver and impact (synthetic defaults when absent)
+    _sev_impact = {
+        "critical": "Significant performance risk requiring immediate attention",
+        "high": "High impact on KPI performance — review urgently",
+        "medium": "Moderate impact on operational metrics",
+        "low": "Minor variance within acceptable range",
+    }
+    enriched_insights: list = []
+    for ins in result.get("insights", []):
+        enriched = dict(ins)
+        if "driver" not in enriched or not enriched.get("driver"):
+            enriched["driver"] = (ins.get("finding") or "")[:120] or ins.get("headline", "")
+        if "impact" not in enriched or not enriched.get("impact"):
+            enriched["impact"] = _sev_impact.get(ins.get("severity", "low"), _sev_impact["low"])
+        enriched_insights.append(enriched)
+
+    # Synthesise a per-KPI insight for any metric the AI didn't cover
+    _status_to_sev = {"risk": "high", "warning": "medium", "good": "low", "neutral": "low"}
+    _covered_headlines = {ins.get("headline", "").lower() for ins in enriched_insights}
+    for m in metrics:
+        mname = m["name"]
+        if any(mname.lower() in h for h in _covered_headlines):
+            continue
+        val = m["value"]
+        sev = _status_to_sev.get(m.get("status", "neutral"), "low")
+        delta_pct = m.get("delta_pct")
+        prior = m.get("prior_value")
+        if delta_pct is not None and prior is not None:
+            went_up = delta_pct >= 0
+            hib = m.get("direction") == "higher_is_better"
+            direction_word = "improved" if (went_up == hib) else "declined"
+            if abs(delta_pct) < 0.1:
+                finding = f"No significant change from prior period. Current: {val:.1f}, Prior: {prior:.1f}."
+            else:
+                finding = f"{direction_word.capitalize()} {abs(delta_pct):.1f}% from prior period. Current: {val:.1f}, Prior: {prior:.1f}."
+        else:
+            finding = f"Current value: {val:.1f}."
+        enriched_insights.append({
+            "severity": sev,
+            "headline": f"{mname} at {val:.1f}",
+            "finding": finding,
+            "driver": finding[:120],
+            "impact": _sev_impact.get(sev, _sev_impact["low"]),
+            "action": None,
+        })
+
+    # ── end enrichment ────────────────────────────────────────────────────────
+
     return {
         "recipe_id": recipe_id,
         "config": {**config, "granularity": effective_granularity},
         "active_filters": active_filters,
         "active_granularity": effective_granularity,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        # Classic fields (unchanged)
         **result,
+        # Enhanced View fields (additive)
+        "metrics": metrics,
+        "time_series_dict": ts_dict,
+        "dimension_breakdowns": dim_breakdowns,
+        "dimension_spreads": dim_spreads,
+        "data_quality": data_quality,
+        "row_count": row_count,
+        "approved": approved,
+        "insights": enriched_insights,
     }
 
 

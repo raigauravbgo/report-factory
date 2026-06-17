@@ -196,3 +196,57 @@ export interface RecipeResponse {
   version: number;
   approved_at: string | null;
 }
+
+// ── Dashboard (Enhanced View) ─────────────────────────────────────────────────
+
+export interface DashboardMetric {
+  id: number;
+  name: string;
+  value: number;
+  delta: number | null;
+  delta_pct: number | null;
+  status: "good" | "warning" | "risk" | "neutral";
+  direction: "higher_is_better" | "lower_is_better";
+  prior_value: number | null;
+  count: number;
+  period: string | null;
+  formula: string;
+  format: string;
+}
+
+export interface DashboardInsight {
+  severity: "critical" | "high" | "medium" | "low";
+  headline: string;
+  finding: string;
+  driver: string;
+  impact: string;
+  action: string | null;
+}
+
+export interface DataQuality {
+  status: "ok" | "warning";
+  date_coverage: string | null;
+  most_recent_date: string | null;
+  warnings: string[];
+}
+
+export interface DashboardData {
+  recipe_id: number;
+  config: RecipeConfig;
+  active_filters: Record<string, string>;
+  active_granularity: string;
+  generated_at: string;
+  // Classic fields
+  kpi_summaries: Array<{ name: string; value: number | null; formula: string; format?: string }>;
+  time_series: Array<{ kpi: string; data: Array<{ date: string; value: number }> }>;
+  breakdown: Array<{ kpi: string; dimension: string; data: Array<{ label: string; value: number }> }>;
+  // Enhanced fields
+  metrics: DashboardMetric[];
+  time_series_dict: Record<string, Array<{ period: string; value: number }>>;
+  dimension_breakdowns: Record<string, Record<string, Array<{ name: string; value: number }>>>;
+  dimension_spreads: Record<string, number>;
+  data_quality: DataQuality;
+  row_count: number;
+  approved: boolean;
+  insights: DashboardInsight[];
+}

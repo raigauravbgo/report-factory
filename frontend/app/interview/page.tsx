@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { ChatMessage, InterviewResult } from "@/lib/types";
@@ -13,7 +13,7 @@ const STEP_LABELS = [
   "Filters",
 ];
 
-export default function InterviewPage() {
+function InterviewInner() {
   const router = useRouter();
   const params = useSearchParams();
   const uploadId = Number(params.get("uploadId"));
@@ -194,5 +194,13 @@ export default function InterviewPage() {
       )}
     </main>
     </div>
+  );
+}
+
+export default function InterviewPage() {
+  return (
+    <Suspense>
+      <InterviewInner />
+    </Suspense>
   );
 }
