@@ -29,6 +29,25 @@ const STATUS_STYLE: Record<UploadStatus, string> = {
 };
 
 const STEPS = ["Upload", "Schema", "Interview", "KPIs", "Dimensions", "Dashboard"];
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+interface TemplateMatch {
+  template: {
+    id: number;
+    name: string;
+    kpi_names: string[];
+    kpi_count: number;
+    date_column: string;
+    granularity: string;
+    dimensions: string[];
+    filters: string[];
+    file_slots: { slot: number; filename_hint: string; column_count: number }[];
+    source_recipe_id: number | null;
+    config: Record<string, unknown>;
+    created_at: string | null;
+  };
+  slot_assignments: { slot: number; matched_file: string; overlap: number }[];
+}
 
 export default function UploadPage() {
   const router = useRouter();
@@ -36,6 +55,8 @@ export default function UploadPage() {
   const [datasetId, setDatasetId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [matchingTemplates, setMatchingTemplates] = useState<TemplateMatch[]>([]);
+  const [matchLoading, setMatchLoading] = useState(false);
   const pollingRef = useRef<Record<number, ReturnType<typeof setInterval>>>({});
 
   useEffect(() => {
@@ -111,6 +132,42 @@ export default function UploadPage() {
 
   const allProfiled = files.length > 0 && files.every((f) => f.status === "profiled");
   const anyFailed = files.some((f) => f.status === "failed");
+
+  // When all files are profiled, fetch column profiles and check for matching templates
+  useEffect(() => {
+    if (!allProfiled || files.length === 0) return;
+    setMatchLoading(true);
+    Promise.all(
+      files.map(async (f) => {
+        const res = await fetch(`${BASE_URL}/upload/${f.uploadId}/profile`);
+        if (!res.ok) return { filename: f.filename, columns: [] as string[] };
+        const data = await res.json();
+        const cols: string[] = (data.columns ?? []).map((c: { name: string }) => c.name);
+        return { filename: f.filename, columns: cols };
+      })
+    )
+      .then((uploadedFiles) =>
+        fetch(`${BASE_URL}/api/templates/match`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uploaded_files: uploadedFiles }),
+        })
+      )
+      .then((r) => (r.ok ? r.json() : []))
+      .then((matches: TemplateMatch[]) => setMatchingTemplates(matches))
+      .catch(() => setMatchingTemplates([]))
+      .finally(() => setMatchLoading(false));
+  }, [allProfiled]);
+
+  const handleUseTemplate = (match: TemplateMatch) => {
+    if (!datasetId) return;
+    sessionStorage.setItem(
+      `dataset_${datasetId}_uploads`,
+      JSON.stringify(files.map((f) => ({ uploadId: f.uploadId, filename: f.filename }))),
+    );
+    sessionStorage.setItem(`dataset_${datasetId}_template`, JSON.stringify(match.template));
+    router.push(`/session/${datasetId}/review`);
+  };
 
   const handleContinue = () => {
     if (!datasetId) return;
@@ -209,6 +266,49 @@ export default function UploadPage() {
               </div>
             )}
 
+            {/* Matching templates */}
+            {allProfiled && (matchLoading || matchingTemplates.length > 0) && (
+              <div className="space-y-2.5">
+                <p className="text-[10px] font-bold text-mist uppercase tracking-[0.1em] flex items-center gap-2">
+                  Matching Templates
+                  {matchLoading && <span className="h-3 w-3 animate-spin rounded-full border-2 border-signal border-t-transparent" />}
+                </p>
+                {matchLoading && (
+                  <p className="text-[11px] text-mist">Checking saved templates…</p>
+                )}
+                {!matchLoading && matchingTemplates.map((match) => (
+                  <div
+                    key={match.template.id}
+                    className="border border-signal/30 bg-signal/5 rounded-xl p-4 cursor-pointer hover:border-signal/60 hover:bg-signal/10 transition-all group"
+                    onClick={() => handleUseTemplate(match)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-bold text-ink">{match.template.name}</p>
+                        <p className="text-[10px] text-mist mt-0.5 truncate">
+                          {match.template.kpi_names.slice(0, 4).join(" · ")}
+                          {match.template.kpi_count > 4 && ` +${match.template.kpi_count - 4} more`}
+                        </p>
+                        <div className="flex gap-3 mt-1.5 text-[10px] text-dim">
+                          <span>{match.template.kpi_count} KPIs</span>
+                          <span>{match.template.granularity}</span>
+                          <span>{match.template.date_column}</span>
+                          {match.slot_assignments.map((a) => (
+                            <span key={a.slot} className="text-grow">
+                              ✓ {Math.round(a.overlap * 100)}% match
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <span className="text-[11px] text-signal font-semibold flex-shrink-0 group-hover:underline">
+                        Use template →
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* CTA row */}
             {files.length > 0 && (
               <div className="flex items-center justify-between pt-1">
@@ -233,7 +333,7 @@ export default function UploadPage() {
                       : "bg-raised text-mist cursor-not-allowed border border-rim"}`}
                 >
                   {allProfiled
-                    ? <>Continue to Schema <span className="opacity-70">→</span></>
+                    ? <>{matchingTemplates.length > 0 ? "Start fresh (full setup)" : "Continue to Schema"} <span className="opacity-70">→</span></>
                     : anyFailed
                     ? "Some files failed"
                     : <>

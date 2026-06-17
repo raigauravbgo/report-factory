@@ -117,9 +117,10 @@ def _build_prompt(file_contexts: list[dict], interview_answers: dict) -> str:
         fields = k.get("source_fields", [])
         aliases = k.get("aliases", [])
         fmt = k.get("format", "decimal")
+        formula_hint = f" | formula={k['formula']}" if k.get("formula") else ""
         catalog_lines.append(
             f"  {k['kpi_id']} | {k['display_name']} [{k['domain']}] | "
-            f"format={fmt} | source_fields={fields} | aliases={aliases}"
+            f"format={fmt}{formula_hint} | source_fields={fields} | aliases={aliases}"
         )
     catalog_ref = "\n".join(catalog_lines)
 
@@ -343,19 +344,31 @@ def _catalog_fallback(col_names: list[str]) -> list[dict]:
             continue
 
         fmt = kpi.get("format", "decimal")
-        den_raw = kpi.get("denominator", "_none_")
 
-        if den_raw and den_raw != "_none_":
-            den_col, den_score = _best_col([den_raw])
-            if den_col and den_col != num_col:
-                formula = f"{num_col} / {den_col}"
-                conf = round(min(num_score, den_score) * 0.9, 2)
+        # When the catalog entry has a direct formula, verify all column tokens
+        # resolve to actual columns and use it as-is (handles compound denominators).
+        catalog_formula = kpi.get("formula", "")
+        if catalog_formula:
+            tokens = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", catalog_formula)
+            resolved_tokens = [_best_col([t])[0] for t in tokens]
+            if all(resolved_tokens):
+                formula = catalog_formula
+                conf = round(num_score, 2)
+            else:
+                continue  # formula references columns not present in this dataset
+        else:
+            den_raw = kpi.get("denominator", "_none_")
+            if den_raw and den_raw != "_none_":
+                den_col, den_score = _best_col([den_raw])
+                if den_col and den_col != num_col:
+                    formula = f"{num_col} / {den_col}"
+                    conf = round(min(num_score, den_score) * 0.9, 2)
+                else:
+                    formula = _col_formula(num_col, fmt)
+                    conf = round(num_score * 0.65, 2)
             else:
                 formula = _col_formula(num_col, fmt)
-                conf = round(num_score * 0.65, 2)
-        else:
-            formula = _col_formula(num_col, fmt)
-            conf = round(num_score, 2)
+                conf = round(num_score, 2)
 
         key = re.sub(r"\s+", "", formula.lower())
         if key in seen:
@@ -371,7 +384,7 @@ def _catalog_fallback(col_names: list[str]) -> list[dict]:
             "source": "catalog",
             "domain": kpi.get("domain", "ops"),
             "description": kpi.get("description", ""),
-            "aggregation": "ratio_of_sums" if "/" in formula else "",
+            "aggregation": kpi.get("aggregation") or ("ratio_of_sums" if "/" in formula else ""),
             "format": fmt,
             "catalog_match": kpi["kpi_id"],
         })

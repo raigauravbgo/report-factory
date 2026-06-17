@@ -18,6 +18,54 @@ from services.compute import compute_dashboard, get_filter_options
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
+@router.get("")
+def list_dashboards(db: Session = Depends(get_db)):
+    """List all generated dashboards (ReportRecipes) for the Library page.
+
+    Returns each recipe with the file names and KPI names from its config so
+    the Library page can display them without a separate data fetch.
+    """
+    from models.dataset import Dataset
+
+    recipes = (
+        db.query(ReportRecipe)
+        .order_by(ReportRecipe.created_at.desc())
+        .all()
+    )
+    result = []
+    for r in recipes:
+        cfg = r.config or {}
+        dataset_id = r.dataset_id or cfg.get("dataset_id")
+
+        # Collect file names for this dataset (skip virtual dimension)
+        filenames: list[str] = []
+        if dataset_id:
+            uploads = (
+                db.query(Upload)
+                .filter(
+                    Upload.dataset_id == dataset_id,
+                    Upload.filename != "__virtual_dimension__",
+                )
+                .all()
+            )
+            filenames = [u.filename for u in uploads]
+
+        kpi_names = [k.get("name", "") for k in cfg.get("kpis", [])]
+
+        result.append({
+            "recipe_id": r.id,
+            "dataset_id": dataset_id,
+            "client_id": r.client_id or "—",
+            "filenames": filenames,
+            "kpi_names": kpi_names,
+            "kpi_count": len(kpi_names),
+            "date_column": cfg.get("date_column") or "",
+            "granularity": cfg.get("granularity") or "weekly",
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return result
+
+
 def _get_recipe_and_staging(recipe_id: int, db: Session):
     """Return (recipe, config, primary_staging, all_table_names).
 
@@ -39,12 +87,16 @@ def _get_recipe_and_staging(recipe_id: int, db: Session):
     # Collect ALL staging tables for the dataset to support multi-file compute.
     # If dataset_id is present use it; otherwise fall back to single upload.
     # H4: Single JOIN query replaces N+1 (one StagingTable query per upload)
+    # Exclude virtual dimension tables — they are built from fact-table data and
+    # are only used for filter enrichment. Including them in the concat doubles
+    # row counts for every count/sum KPI (e.g. 17 503 rows → 35 006).
     all_table_names: list[str] = []
     if dataset_id:
         staging_rows = (
             db.query(StagingTable)
             .join(Upload, StagingTable.upload_id == Upload.id)
             .filter(Upload.dataset_id == dataset_id)
+            .filter(Upload.filename != "__virtual_dimension__")
             .all()
         )
         all_table_names = [st.table_name for st in staging_rows]

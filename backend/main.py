@@ -17,6 +17,7 @@ from api.routes import reports as reports_router
 from api.routes import dashboard as dashboard_router
 from api.routes import session as session_router
 from api.routes import log as log_router
+from api.routes import templates as templates_router
 from db.database import init_db
 
 # Import all models so SQLAlchemy registers them before create_all
@@ -27,6 +28,8 @@ import models.processed_table  # noqa
 import models.report_recipe  # noqa
 import models.kpi_definition  # noqa
 import models.dashboard_config  # noqa
+import models.custom_kpi_proposal  # noqa
+import models.report_template  # noqa
 
 app = FastAPI(
     title="BGO Report Factory",
@@ -93,6 +96,7 @@ app.include_router(reports_router.router)
 app.include_router(dashboard_router.router)
 app.include_router(session_router.router)
 app.include_router(log_router.router)
+app.include_router(templates_router.router)
 
 
 @app.get("/health")

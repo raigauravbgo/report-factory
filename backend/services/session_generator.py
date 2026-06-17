@@ -191,7 +191,71 @@ def generate_from_session(
     db.add(recipe)
     db.commit()
     db.refresh(recipe)
+
+    # Persist AI-generated custom KPIs as pending proposals for ops approval.
+    # Only KPIs with source="ai" and no catalog_match are truly custom.
+    _save_custom_kpi_proposals(selected_kpis, dataset_id, recipe.id, db)
+
     return recipe.id
+
+
+def _save_custom_kpi_proposals(
+    selected_kpis: list[dict],
+    dataset_id: int,
+    recipe_id: int,
+    db: "DbSession",
+) -> None:
+    """Insert pending CustomKpiProposal rows for any AI-generated KPIs in this recipe.
+
+    Skips KPIs already proposed for the same dataset (deduplicates by kpi_id + dataset_id).
+    """
+    from models.custom_kpi_proposal import CustomKpiProposal
+
+    for kpi in selected_kpis:
+        # "ai" = AI-generated non-catalog KPI; "interview" = user manually built it
+        # "catalog" = already in kpis.json — skip those
+        if kpi.get("source") not in ("ai", "interview"):
+            continue
+        if kpi.get("catalog_match"):
+            continue  # AI recognised a catalog match — skip
+
+        kpi_id = kpi.get("kpi_id") or ""
+        if not kpi_id:
+            raw_name = kpi.get("display_name") or kpi.get("name") or "custom_kpi"
+            import re as _re
+            kpi_id = _re.sub(r"[^a-z0-9]+", "_", raw_name.lower()).strip("_")
+
+        # Skip if already proposed for this dataset to avoid duplicate pending entries
+        existing = (
+            db.query(CustomKpiProposal)
+            .filter(
+                CustomKpiProposal.kpi_id == kpi_id,
+                CustomKpiProposal.dataset_id == dataset_id,
+            )
+            .first()
+        )
+        if existing:
+            continue
+
+        proposal = CustomKpiProposal(
+            kpi_id=kpi_id,
+            display_name=kpi.get("display_name") or kpi.get("name") or kpi_id,
+            formula=kpi.get("formula") or "",
+            description=kpi.get("description") or "",
+            domain=kpi.get("domain") or "",
+            aggregation=kpi.get("aggregation") or "",
+            format=kpi.get("format") or "decimal",
+            status="pending",
+            dataset_id=dataset_id,
+            recipe_id=recipe_id,
+        )
+        db.add(proposal)
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("CUSTOM_KPI_PROPOSALS: failed to save proposals: %s", exc)
 
 
 def _build_sections(kpis: list[dict], interview_result: dict) -> list[dict]:

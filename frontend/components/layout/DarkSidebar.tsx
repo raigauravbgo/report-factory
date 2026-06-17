@@ -27,10 +27,19 @@ const ReviewIcon = () => (
   </svg>
 );
 
+const KpiIcon = () => (
+  <svg viewBox="0 0 16 16" fill="none" className="w-[15px] h-[15px]">
+    <path d="M2 12.5L5.5 8l2.5 2.5L11 6l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    <circle cx="13" cy="3.5" r="2" stroke="currentColor" strokeWidth="1.4"/>
+    <path d="M11.5 3.5h-10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+  </svg>
+);
+
 const NAV = [
-  { label: "Library",      href: "/",            Icon: LibraryIcon },
-  { label: "Upload",       href: "/upload",       Icon: UploadIcon  },
-  { label: "Review Queue", href: "/review-queue", Icon: ReviewIcon  },
+  { label: "Library",         href: "/",             Icon: LibraryIcon },
+  { label: "Upload",          href: "/upload",        Icon: UploadIcon  },
+  { label: "Review Queue",    href: "/review-queue",  Icon: ReviewIcon  },
+  { label: "KPI Approvals",   href: "/kpis/custom",   Icon: KpiIcon     },
 ];
 
 export default function DarkSidebar() {

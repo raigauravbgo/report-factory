@@ -7,9 +7,21 @@
     "denominator": "total_dials",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["contact rate %", "live contact rate", "LCP"],
-    "source_fields": ["live_contacts", "contacts", "rpc_count", "total_contacts"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "contact rate %",
+      "live contact rate",
+      "LCP"
+    ],
+    "source_fields": [
+      "live_contacts",
+      "contacts",
+      "rpc_count",
+      "total_contacts"
+    ],
     "reviewed": true
   },
   {
@@ -20,9 +32,21 @@
     "denominator": "live_contacts",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["promise to pay %", "PTP %", "promise rate"],
-    "source_fields": ["ptp_count", "ptps", "promises", "kept_arrangements"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "promise to pay %",
+      "PTP %",
+      "promise rate"
+    ],
+    "source_fields": [
+      "ptp_count",
+      "ptps",
+      "promises",
+      "kept_arrangements"
+    ],
     "reviewed": true
   },
   {
@@ -33,9 +57,20 @@
     "denominator": "ptp_count",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["kept rate", "promise kept %", "PTP kept"],
-    "source_fields": ["ptp_kept", "kept_ptps", "honoured_arrangements"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "kept rate",
+      "promise kept %",
+      "PTP kept"
+    ],
+    "source_fields": [
+      "ptp_kept",
+      "kept_ptps",
+      "honoured_arrangements"
+    ],
     "reviewed": true
   },
   {
@@ -47,8 +82,17 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["PTP count", "promises", "payment promises"],
-    "source_fields": ["payment_promise_count", "ptp_count", "promise_count", "AICRef"],
+    "aliases": [
+      "PTP count",
+      "promises",
+      "payment promises"
+    ],
+    "source_fields": [
+      "payment_promise_count",
+      "ptp_count",
+      "promise_count",
+      "AICRef"
+    ],
     "reviewed": true
   },
   {
@@ -59,9 +103,20 @@
     "denominator": "unique_rpc_count",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["RPC payer rate", "RPC conversion"],
-    "source_fields": ["payer_outcome_rpc_count", "unique_rpc_count", "rpc_with_payment", "rpc_with_promise"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "RPC payer rate",
+      "RPC conversion"
+    ],
+    "source_fields": [
+      "payer_outcome_rpc_count",
+      "unique_rpc_count",
+      "rpc_with_payment",
+      "rpc_with_promise"
+    ],
     "reviewed": true
   },
   {
@@ -73,8 +128,15 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["unique payers", "payer count"],
-    "source_fields": ["unique_payer_count", "AICRef", "payer_outcomes"],
+    "aliases": [
+      "unique payers",
+      "payer count"
+    ],
+    "source_fields": [
+      "unique_payer_count",
+      "AICRef",
+      "payer_outcomes"
+    ],
     "reviewed": true
   },
   {
@@ -86,8 +148,16 @@
     "format": "currency",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["bounced payments", "reversed payments", "returned payments"],
-    "source_fields": ["returned_payment_amount", "negative_payments", "bounced_amount"],
+    "aliases": [
+      "bounced payments",
+      "reversed payments",
+      "returned payments"
+    ],
+    "source_fields": [
+      "returned_payment_amount",
+      "negative_payments",
+      "bounced_amount"
+    ],
     "reviewed": true
   },
   {
@@ -99,8 +169,15 @@
     "format": "currency",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["net collections", "net cash collected"],
-    "source_fields": ["payment_received", "net_collected", "collections_net"],
+    "aliases": [
+      "net collections",
+      "net cash collected"
+    ],
+    "source_fields": [
+      "payment_received",
+      "net_collected",
+      "collections_net"
+    ],
     "reviewed": true
   },
   {
@@ -112,8 +189,15 @@
     "format": "currency",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["total collections", "gross collected"],
-    "source_fields": ["total_payment_amount", "total_collected", "gross_collections"],
+    "aliases": [
+      "total collections",
+      "gross collected"
+    ],
+    "source_fields": [
+      "total_payment_amount",
+      "total_collected",
+      "gross_collections"
+    ],
     "reviewed": true
   },
   {
@@ -124,9 +208,18 @@
     "denominator": "net_collected_amount",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["website collection %", "online collection share"],
-    "source_fields": ["website_collected_amount", "net_collected_amount"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "website collection %",
+      "online collection share"
+    ],
+    "source_fields": [
+      "website_collected_amount",
+      "net_collected_amount"
+    ],
     "reviewed": true
   },
   {
@@ -138,8 +231,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["website PTP", "online PTP", "PTP volume"],
-    "source_fields": ["website_ptp_count", "ptp_volume", "website_promises"],
+    "aliases": [
+      "website PTP",
+      "online PTP",
+      "PTP volume"
+    ],
+    "source_fields": [
+      "website_ptp_count",
+      "ptp_volume",
+      "website_promises"
+    ],
     "reviewed": true
   },
   {
@@ -151,8 +252,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["website payments", "online payments", "payment count"],
-    "source_fields": ["website_payment_count", "payment_volume", "website_transactions"],
+    "aliases": [
+      "website payments",
+      "online payments",
+      "payment count"
+    ],
+    "source_fields": [
+      "website_payment_count",
+      "payment_volume",
+      "website_transactions"
+    ],
     "reviewed": true
   },
   {
@@ -164,8 +273,15 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["unique RPCs", "distinct RPCs"],
-    "source_fields": ["unique_rpc_count", "rpc_distinct", "unique_rpc"],
+    "aliases": [
+      "unique RPCs",
+      "distinct RPCs"
+    ],
+    "source_fields": [
+      "unique_rpc_count",
+      "rpc_distinct",
+      "unique_rpc"
+    ],
     "reviewed": true
   },
   {
@@ -176,9 +292,19 @@
     "denominator": "unique_rpc_count",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["payer conversion rate", "website conversion"],
-    "source_fields": ["payer_action_count", "unique_rpc_count", "website_conversions"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "payer conversion rate",
+      "website conversion"
+    ],
+    "source_fields": [
+      "payer_action_count",
+      "unique_rpc_count",
+      "website_conversions"
+    ],
     "reviewed": true
   },
   {
@@ -189,9 +315,21 @@
     "denominator": "logged_in_time",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["utilisation", "occupancy %", "productive %"],
-    "source_fields": ["online_time", "logged_in_time", "productive_time", "login_time"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "utilisation",
+      "occupancy %",
+      "productive %"
+    ],
+    "source_fields": [
+      "online_time",
+      "logged_in_time",
+      "productive_time",
+      "login_time"
+    ],
     "reviewed": true
   },
   {
@@ -203,8 +341,15 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["loaded records", "dialler load"],
-    "source_fields": ["dialler_record_count", "dialler_records", "loaded_accounts"],
+    "aliases": [
+      "loaded records",
+      "dialler load"
+    ],
+    "source_fields": [
+      "dialler_record_count",
+      "dialler_records",
+      "loaded_accounts"
+    ],
     "reviewed": true
   },
   {
@@ -216,8 +361,15 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["attempts", "total attempts records"],
-    "source_fields": ["records_attempted_count", "records_attempted", "dial_attempts"],
+    "aliases": [
+      "attempts",
+      "total attempts records"
+    ],
+    "source_fields": [
+      "records_attempted_count",
+      "records_attempted",
+      "dial_attempts"
+    ],
     "reviewed": true
   },
   {
@@ -228,9 +380,19 @@
     "denominator": "dialler_record_count",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 2 },
-    "aliases": ["reach rate", "dialler penetration", "penetration %"],
-    "source_fields": ["records_attempted_count", "dialler_record_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 2
+    },
+    "aliases": [
+      "reach rate",
+      "dialler penetration",
+      "penetration %"
+    ],
+    "source_fields": [
+      "records_attempted_count",
+      "dialler_record_count"
+    ],
     "reviewed": true
   },
   {
@@ -242,8 +404,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["dial attempts", "total dials"],
-    "source_fields": ["total_attempt_count", "total_attempts", "dialler_attempts", "manual_attempts"],
+    "aliases": [
+      "dial attempts",
+      "total dials"
+    ],
+    "source_fields": [
+      "total_attempt_count",
+      "total_attempts",
+      "dialler_attempts",
+      "manual_attempts"
+    ],
     "reviewed": true
   },
   {
@@ -255,8 +425,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["total connections", "connects"],
-    "source_fields": ["total_connect_count", "total_connects", "voice_connects", "vm_connects"],
+    "aliases": [
+      "total connections",
+      "connects"
+    ],
+    "source_fields": [
+      "total_connect_count",
+      "total_connects",
+      "voice_connects",
+      "vm_connects"
+    ],
     "reviewed": true
   },
   {
@@ -268,8 +446,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["live connects", "answered calls", "voice connects"],
-    "source_fields": ["voice_connect_count", "live_connects", "answered_calls"],
+    "aliases": [
+      "live connects",
+      "answered calls",
+      "voice connects"
+    ],
+    "source_fields": [
+      "voice_connect_count",
+      "live_connects",
+      "answered_calls"
+    ],
     "reviewed": true
   },
   {
@@ -281,8 +467,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["VM connects", "voicemail connects", "voicemail drops"],
-    "source_fields": ["voicemail_connect_count", "vm_connects", "voicemail_connects"],
+    "aliases": [
+      "VM connects",
+      "voicemail connects",
+      "voicemail drops"
+    ],
+    "source_fields": [
+      "voicemail_connect_count",
+      "vm_connects",
+      "voicemail_connects"
+    ],
     "reviewed": true
   },
   {
@@ -293,9 +487,18 @@
     "denominator": "total_attempt_count",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["engagement rate", "dial connect rate"],
-    "source_fields": ["total_connect_count", "total_attempt_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "engagement rate",
+      "dial connect rate"
+    ],
+    "source_fields": [
+      "total_connect_count",
+      "total_attempt_count"
+    ],
     "reviewed": true
   },
   {
@@ -306,9 +509,21 @@
     "denominator": "total_received_calls",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["call abandon rate", "drop rate", "abandoned %"],
-    "source_fields": ["abandoned_calls", "total_received_calls", "received_calls", "answered_calls"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "call abandon rate",
+      "drop rate",
+      "abandoned %"
+    ],
+    "source_fields": [
+      "abandoned_calls",
+      "total_received_calls",
+      "received_calls",
+      "answered_calls"
+    ],
     "reviewed": true
   },
   {
@@ -320,8 +535,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["manual dials", "manual attempts", "OB manual"],
-    "source_fields": ["manual_dial_count", "manual_attempts", "CallType_Manual"],
+    "aliases": [
+      "manual dials",
+      "manual attempts",
+      "OB manual"
+    ],
+    "source_fields": [
+      "manual_dial_count",
+      "manual_attempts",
+      "CallType_Manual"
+    ],
     "reviewed": true
   },
   {
@@ -333,8 +556,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["auto dials", "dialler attempts", "OB dialler"],
-    "source_fields": ["outbound_dial_count", "dialler_attempts", "CallType_Outbound"],
+    "aliases": [
+      "auto dials",
+      "dialler attempts",
+      "OB dialler"
+    ],
+    "source_fields": [
+      "outbound_dial_count",
+      "dialler_attempts",
+      "CallType_Outbound"
+    ],
     "reviewed": true
   },
   {
@@ -346,8 +577,14 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["OB voice connects", "outbound live connects"],
-    "source_fields": ["ob_voice_connect_count", "outbound_voice_connects"],
+    "aliases": [
+      "OB voice connects",
+      "outbound live connects"
+    ],
+    "source_fields": [
+      "ob_voice_connect_count",
+      "outbound_voice_connects"
+    ],
     "reviewed": true
   },
   {
@@ -359,8 +596,14 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["OB voicemail connects", "outbound VM connects"],
-    "source_fields": ["ob_voicemail_connect_count", "outbound_vm_connects"],
+    "aliases": [
+      "OB voicemail connects",
+      "outbound VM connects"
+    ],
+    "source_fields": [
+      "ob_voicemail_connect_count",
+      "outbound_vm_connects"
+    ],
     "reviewed": true
   },
   {
@@ -372,8 +615,16 @@
     "format": "integer",
     "domain": "collections",
     "expected_range": null,
-    "aliases": ["OB RPC", "dialler RPC", "outbound RPC count"],
-    "source_fields": ["outbound_rpc_count", "rpc_outbound", "TCN_rpc"],
+    "aliases": [
+      "OB RPC",
+      "dialler RPC",
+      "outbound RPC count"
+    ],
+    "source_fields": [
+      "outbound_rpc_count",
+      "rpc_outbound",
+      "TCN_rpc"
+    ],
     "reviewed": true
   },
   {
@@ -384,9 +635,18 @@
     "denominator": "total_connect_count",
     "format": "percentage",
     "domain": "collections",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["OB RPC rate", "dialler RPC rate"],
-    "source_fields": ["outbound_rpc_count", "total_connect_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "OB RPC rate",
+      "dialler RPC rate"
+    ],
+    "source_fields": [
+      "outbound_rpc_count",
+      "total_connect_count"
+    ],
     "reviewed": true
   },
   {
@@ -397,9 +657,23 @@
     "denominator": "possible_points",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["quality score", "QA %", "quality assurance score", "evaluation score"],
-    "source_fields": ["raw_points", "possible_points", "total_yes", "total_no", "qa_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "quality score",
+      "QA %",
+      "quality assurance score",
+      "evaluation score"
+    ],
+    "source_fields": [
+      "raw_points",
+      "possible_points",
+      "total_yes",
+      "total_no",
+      "qa_score"
+    ],
     "reviewed": true
   },
   {
@@ -410,9 +684,19 @@
     "denominator": "category_possible_points",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["section score", "QA category %"],
-    "source_fields": ["category_raw_points", "category_possible_points", "section_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "section score",
+      "QA category %"
+    ],
+    "source_fields": [
+      "category_raw_points",
+      "category_possible_points",
+      "section_score"
+    ],
     "reviewed": true
   },
   {
@@ -424,8 +708,17 @@
     "format": "integer",
     "domain": "cx",
     "expected_range": null,
-    "aliases": ["markdowns", "deductions", "critical failures"],
-    "source_fields": ["markdown_count", "mark_down", "deduction_count", "failure_count"],
+    "aliases": [
+      "markdowns",
+      "deductions",
+      "critical failures"
+    ],
+    "source_fields": [
+      "markdown_count",
+      "mark_down",
+      "deduction_count",
+      "failure_count"
+    ],
     "reviewed": true
   },
   {
@@ -436,9 +729,20 @@
     "denominator": "total_attribute_responses",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["compliance rate", "compliance score", "adherence %"],
-    "source_fields": ["compliant_count", "total_yes", "total_attribute_responses"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "compliance rate",
+      "compliance score",
+      "adherence %"
+    ],
+    "source_fields": [
+      "compliant_count",
+      "total_yes",
+      "total_attribute_responses"
+    ],
     "reviewed": true
   },
   {
@@ -449,9 +753,20 @@
     "denominator": "total_attribute_responses",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["non-compliance rate", "breach rate", "failure %"],
-    "source_fields": ["non_compliant_count", "total_no", "total_attribute_responses"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "non-compliance rate",
+      "breach rate",
+      "failure %"
+    ],
+    "source_fields": [
+      "non_compliant_count",
+      "total_no",
+      "total_attribute_responses"
+    ],
     "reviewed": true
   },
   {
@@ -462,9 +777,21 @@
     "denominator": "total_survey_responses",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["customer satisfaction", "CSAT %", "satisfaction score"],
-    "source_fields": ["satisfied_responses", "total_survey_responses", "csat_score", "positive_responses"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "customer satisfaction",
+      "CSAT %",
+      "satisfaction score"
+    ],
+    "source_fields": [
+      "satisfied_responses",
+      "total_survey_responses",
+      "csat_score",
+      "positive_responses"
+    ],
     "reviewed": true
   },
   {
@@ -475,9 +802,20 @@
     "denominator": "pa_regulatory_evaluation_count",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["regulatory score", "process adherence score", "PA score"],
-    "source_fields": ["pa_regulatory_score_sum", "pa_regulatory_evaluation_count", "pa_regulatory_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "regulatory score",
+      "process adherence score",
+      "PA score"
+    ],
+    "source_fields": [
+      "pa_regulatory_score_sum",
+      "pa_regulatory_evaluation_count",
+      "pa_regulatory_score"
+    ],
     "reviewed": true
   },
   {
@@ -488,9 +826,19 @@
     "denominator": "evaluation_count",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["unproductive contacts", "NPC score"],
-    "source_fields": ["non_productive_score_sum", "evaluation_count", "non_productive_contacts_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "unproductive contacts",
+      "NPC score"
+    ],
+    "source_fields": [
+      "non_productive_score_sum",
+      "evaluation_count",
+      "non_productive_contacts_score"
+    ],
     "reviewed": true
   },
   {
@@ -501,9 +849,20 @@
     "denominator": "evaluation_count",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["deflection score", "escalation deflection", "supervisor avoid rate"],
-    "source_fields": ["deflection_score_sum", "evaluation_count", "supervisor_deflection_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "deflection score",
+      "escalation deflection",
+      "supervisor avoid rate"
+    ],
+    "source_fields": [
+      "deflection_score_sum",
+      "evaluation_count",
+      "supervisor_deflection_score"
+    ],
     "reviewed": true
   },
   {
@@ -514,9 +873,19 @@
     "denominator": "evaluation_count",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["clarity score", "communication clarity"],
-    "source_fields": ["understandability_score_sum", "evaluation_count", "understandability_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "clarity score",
+      "communication clarity"
+    ],
+    "source_fields": [
+      "understandability_score_sum",
+      "evaluation_count",
+      "understandability_score"
+    ],
     "reviewed": true
   },
   {
@@ -527,9 +896,21 @@
     "denominator": "evaluation_count",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["FCR failure rate", "repeat calls", "re-contact rate"],
-    "source_fields": ["repeat_contact_score_sum", "evaluation_count", "repeat_contacts", "repeat_call_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "FCR failure rate",
+      "repeat calls",
+      "re-contact rate"
+    ],
+    "source_fields": [
+      "repeat_contact_score_sum",
+      "evaluation_count",
+      "repeat_contacts",
+      "repeat_call_count"
+    ],
     "reviewed": true
   },
   {
@@ -540,9 +921,20 @@
     "denominator": "supervisor_qa_score",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": -0.5, "max": 0.5 },
-    "aliases": ["audit variance", "supervisor variance", "QA calibration gap"],
-    "source_fields": ["bgo_audit_qa_score", "supervisor_qa_score", "audit_variance"],
+    "expected_range": {
+      "min": -0.5,
+      "max": 0.5
+    },
+    "aliases": [
+      "audit variance",
+      "supervisor variance",
+      "QA calibration gap"
+    ],
+    "source_fields": [
+      "bgo_audit_qa_score",
+      "supervisor_qa_score",
+      "audit_variance"
+    ],
     "reviewed": true
   },
   {
@@ -553,9 +945,22 @@
     "denominator": "attribute_possible_points",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["attribute score", "criterion performance", "QA attribute"],
-    "source_fields": ["attribute_raw_points", "attribute_possible_points", "green_count", "amber_count", "red_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "attribute score",
+      "criterion performance",
+      "QA attribute"
+    ],
+    "source_fields": [
+      "attribute_raw_points",
+      "attribute_possible_points",
+      "green_count",
+      "amber_count",
+      "red_count"
+    ],
     "reviewed": true
   },
   {
@@ -566,9 +971,20 @@
     "denominator": "total_evaluation_count",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["coaching rate", "coached %", "coaching coverage"],
-    "source_fields": ["coached_call_count", "total_evaluation_count", "coaching_pct"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "coaching rate",
+      "coached %",
+      "coaching coverage"
+    ],
+    "source_fields": [
+      "coached_call_count",
+      "total_evaluation_count",
+      "coaching_pct"
+    ],
     "reviewed": true
   },
   {
@@ -579,9 +995,20 @@
     "denominator": "total_audited_evaluations",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["calibration score", "QA alignment", "evaluation alignment"],
-    "source_fields": ["matched_evaluation_count", "total_audited_evaluations", "alignment_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "calibration score",
+      "QA alignment",
+      "evaluation alignment"
+    ],
+    "source_fields": [
+      "matched_evaluation_count",
+      "total_audited_evaluations",
+      "alignment_score"
+    ],
     "reviewed": true
   },
   {
@@ -593,8 +1020,16 @@
     "format": "integer",
     "domain": "sales",
     "expected_range": null,
-    "aliases": ["evaluations", "observed calls", "evaluated interactions"],
-    "source_fields": ["total_evaluation_count", "observations", "evaluated_count"],
+    "aliases": [
+      "evaluations",
+      "observed calls",
+      "evaluated interactions"
+    ],
+    "source_fields": [
+      "total_evaluation_count",
+      "observations",
+      "evaluated_count"
+    ],
     "reviewed": true
   },
   {
@@ -605,9 +1040,19 @@
     "denominator": "total_observation_count",
     "format": "percentage",
     "domain": "sales",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["opportunity rate", "opp rate %"],
-    "source_fields": ["opportunity_count", "total_observation_count", "total_opportunities"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "opportunity rate",
+      "opp rate %"
+    ],
+    "source_fields": [
+      "opportunity_count",
+      "total_observation_count",
+      "total_opportunities"
+    ],
     "reviewed": true
   },
   {
@@ -618,9 +1063,20 @@
     "denominator": "total_observation_count",
     "format": "percentage",
     "domain": "sales",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["offer rate", "sales offer rate", "offer %"],
-    "source_fields": ["offer_count", "total_observation_count", "total_offers"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "offer rate",
+      "sales offer rate",
+      "offer %"
+    ],
+    "source_fields": [
+      "offer_count",
+      "total_observation_count",
+      "total_offers"
+    ],
     "reviewed": true
   },
   {
@@ -631,9 +1087,20 @@
     "denominator": "total_observation_count",
     "format": "percentage",
     "domain": "sales",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["close rate", "conversion rate", "sales close %"],
-    "source_fields": ["sales_closed_count", "total_observation_count", "total_sales"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "close rate",
+      "conversion rate",
+      "sales close %"
+    ],
+    "source_fields": [
+      "sales_closed_count",
+      "total_observation_count",
+      "total_sales"
+    ],
     "reviewed": true
   },
   {
@@ -644,9 +1111,18 @@
     "denominator": "total_observation_count",
     "format": "percentage",
     "domain": "sales",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["product opp rate", "specific product opportunity"],
-    "source_fields": ["product_opportunity_count", "total_observation_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "product opp rate",
+      "specific product opportunity"
+    ],
+    "source_fields": [
+      "product_opportunity_count",
+      "total_observation_count"
+    ],
     "reviewed": true
   },
   {
@@ -657,9 +1133,18 @@
     "denominator": "total_observation_count",
     "format": "percentage",
     "domain": "sales",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["product offer %", "specific product offer"],
-    "source_fields": ["product_offer_count", "total_observation_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "product offer %",
+      "specific product offer"
+    ],
+    "source_fields": [
+      "product_offer_count",
+      "total_observation_count"
+    ],
     "reviewed": true
   },
   {
@@ -670,9 +1155,19 @@
     "denominator": "total_observation_count",
     "format": "percentage",
     "domain": "sales",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["product close %", "specific product close", "product conversion"],
-    "source_fields": ["product_sales_count", "total_observation_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "product close %",
+      "specific product close",
+      "product conversion"
+    ],
+    "source_fields": [
+      "product_sales_count",
+      "total_observation_count"
+    ],
     "reviewed": true
   },
   {
@@ -684,8 +1179,17 @@
     "format": "duration",
     "domain": "workforce",
     "expected_range": null,
-    "aliases": ["logged in hours", "system hours", "total login time"],
-    "source_fields": ["login_hour_sum", "login_hours", "login_time", "logged_in_time"],
+    "aliases": [
+      "logged in hours",
+      "system hours",
+      "total login time"
+    ],
+    "source_fields": [
+      "login_hour_sum",
+      "login_hours",
+      "login_time",
+      "logged_in_time"
+    ],
     "reviewed": true
   },
   {
@@ -697,8 +1201,16 @@
     "format": "duration",
     "domain": "workforce",
     "expected_range": null,
-    "aliases": ["active hours", "handle time hours", "productive time"],
-    "source_fields": ["productive_hour_sum", "productive_hours", "productive_time"],
+    "aliases": [
+      "active hours",
+      "handle time hours",
+      "productive time"
+    ],
+    "source_fields": [
+      "productive_hour_sum",
+      "productive_hours",
+      "productive_time"
+    ],
     "reviewed": true
   },
   {
@@ -710,8 +1222,16 @@
     "format": "duration",
     "domain": "workforce",
     "expected_range": null,
-    "aliases": ["paid time", "billable hours", "compensated hours"],
-    "source_fields": ["paid_hour_sum", "paid_hours", "login_hours"],
+    "aliases": [
+      "paid time",
+      "billable hours",
+      "compensated hours"
+    ],
+    "source_fields": [
+      "paid_hour_sum",
+      "paid_hours",
+      "login_hours"
+    ],
     "reviewed": true
   },
   {
@@ -723,8 +1243,16 @@
     "format": "duration",
     "domain": "workforce",
     "expected_range": null,
-    "aliases": ["Workday hours", "scheduled actuals", "reported hours"],
-    "source_fields": ["workday_reported_hours", "paid_hours_workday", "schedule_actuals"],
+    "aliases": [
+      "Workday hours",
+      "scheduled actuals",
+      "reported hours"
+    ],
+    "source_fields": [
+      "workday_reported_hours",
+      "paid_hours_workday",
+      "schedule_actuals"
+    ],
     "reviewed": true
   },
   {
@@ -736,8 +1264,18 @@
     "format": "duration",
     "domain": "workforce",
     "expected_range": null,
-    "aliases": ["non-productive hours", "break time", "offline time", "aux time"],
-    "source_fields": ["pause_hour_sum", "pause_hours", "non_productive_time", "break_time"],
+    "aliases": [
+      "non-productive hours",
+      "break time",
+      "offline time",
+      "aux time"
+    ],
+    "source_fields": [
+      "pause_hour_sum",
+      "pause_hours",
+      "non_productive_time",
+      "break_time"
+    ],
     "reviewed": true
   },
   {
@@ -748,9 +1286,21 @@
     "denominator": "paid_hours",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["productive value percentage", "productive time %", "PVP"],
-    "source_fields": ["productive_hours", "paid_hours", "productive_hour_sum", "paid_hour_sum"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "productive value percentage",
+      "productive time %",
+      "PVP"
+    ],
+    "source_fields": [
+      "productive_hours",
+      "paid_hours",
+      "productive_hour_sum",
+      "paid_hour_sum"
+    ],
     "reviewed": true
   },
   {
@@ -761,9 +1311,21 @@
     "denominator": "total_calls",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["compliance fail", "compliance failure rate", "fail rate"],
-    "source_fields": ["compliance_fail_count", "total_calls", "fail_calls", "answer_label"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "compliance fail",
+      "compliance failure rate",
+      "fail rate"
+    ],
+    "source_fields": [
+      "compliance_fail_count",
+      "total_calls",
+      "fail_calls",
+      "answer_label"
+    ],
     "reviewed": true
   },
   {
@@ -774,9 +1336,21 @@
     "denominator": "evaluation_count",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["average QA score", "QA average", "mean QA score"],
-    "source_fields": ["qa_score_sum", "evaluation_count", "qa_score", "rubric_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "average QA score",
+      "QA average",
+      "mean QA score"
+    ],
+    "source_fields": [
+      "qa_score_sum",
+      "evaluation_count",
+      "qa_score",
+      "rubric_score"
+    ],
     "reviewed": true
   },
   {
@@ -787,9 +1361,19 @@
     "denominator": "total_intervals",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["interval adherence", "status compliance"],
-    "source_fields": ["compliant_intervals", "total_intervals", "interval_compliance"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "interval adherence",
+      "status compliance"
+    ],
+    "source_fields": [
+      "compliant_intervals",
+      "total_intervals",
+      "interval_compliance"
+    ],
     "reviewed": false
   },
   {
@@ -800,9 +1384,21 @@
     "denominator": "total_scheduled_minutes",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["schedule adherence", "adherence %", "WFM adherence"],
-    "source_fields": ["minutes_in_adherence", "total_scheduled_minutes", "minutes_out_of_adherence", "adherence_pct"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "schedule adherence",
+      "adherence %",
+      "WFM adherence"
+    ],
+    "source_fields": [
+      "minutes_in_adherence",
+      "total_scheduled_minutes",
+      "minutes_out_of_adherence",
+      "adherence_pct"
+    ],
     "reviewed": true
   },
   {
@@ -813,9 +1409,21 @@
     "denominator": "survey_count",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 5 },
-    "aliases": ["average CSAT", "mean CSAT", "CSAT average"],
-    "source_fields": ["csat_score_sum", "survey_count", "csat_score", "satisfaction_score"],
+    "expected_range": {
+      "min": 0,
+      "max": 5
+    },
+    "aliases": [
+      "average CSAT",
+      "mean CSAT",
+      "CSAT average"
+    ],
+    "source_fields": [
+      "csat_score_sum",
+      "survey_count",
+      "csat_score",
+      "satisfaction_score"
+    ],
     "reviewed": true
   },
   {
@@ -826,9 +1434,21 @@
     "denominator": "days_in_production",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["attendance rate", "absence rate", "presence %"],
-    "source_fields": ["absence_count", "days_in_production", "absent_days", "scheduled_days"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "attendance rate",
+      "absence rate",
+      "presence %"
+    ],
+    "source_fields": [
+      "absence_count",
+      "days_in_production",
+      "absent_days",
+      "scheduled_days"
+    ],
     "reviewed": true
   },
   {
@@ -839,9 +1459,20 @@
     "denominator": "total_scheduled_days",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["late rate", "lateness %", "tardiness rate"],
-    "source_fields": ["late_count", "total_scheduled_days", "tardiness_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "late rate",
+      "lateness %",
+      "tardiness rate"
+    ],
+    "source_fields": [
+      "late_count",
+      "total_scheduled_days",
+      "tardiness_count"
+    ],
     "reviewed": false
   },
   {
@@ -852,9 +1483,21 @@
     "denominator": "total_agent_count",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["turnover rate", "attrition rate", "headcount attrition"],
-    "source_fields": ["termed_agent_count", "total_agent_count", "terminated_count", "headcount"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "turnover rate",
+      "attrition rate",
+      "headcount attrition"
+    ],
+    "source_fields": [
+      "termed_agent_count",
+      "total_agent_count",
+      "terminated_count",
+      "headcount"
+    ],
     "reviewed": true
   },
   {
@@ -866,8 +1509,16 @@
     "format": "duration",
     "domain": "workforce",
     "expected_range": null,
-    "aliases": ["OT hours", "overtime hours", "extra hours"],
-    "source_fields": ["overtime_hour_sum", "overtime_hours", "ot_hours"],
+    "aliases": [
+      "OT hours",
+      "overtime hours",
+      "extra hours"
+    ],
+    "source_fields": [
+      "overtime_hour_sum",
+      "overtime_hours",
+      "ot_hours"
+    ],
     "reviewed": false
   },
   {
@@ -879,8 +1530,17 @@
     "format": "integer",
     "domain": "cx",
     "expected_range": null,
-    "aliases": ["call volume", "handled calls", "total calls handled"],
-    "source_fields": ["calls_handled_count", "calls_handled", "call_volume", "handled_calls"],
+    "aliases": [
+      "call volume",
+      "handled calls",
+      "total calls handled"
+    ],
+    "source_fields": [
+      "calls_handled_count",
+      "calls_handled",
+      "call_volume",
+      "handled_calls"
+    ],
     "reviewed": true
   },
   {
@@ -892,8 +1552,16 @@
     "format": "integer",
     "domain": "cx",
     "expected_range": null,
-    "aliases": ["chat volume", "handled chats", "total chats handled"],
-    "source_fields": ["chats_handled_count", "chats_handled", "chat_volume"],
+    "aliases": [
+      "chat volume",
+      "handled chats",
+      "total chats handled"
+    ],
+    "source_fields": [
+      "chats_handled_count",
+      "chats_handled",
+      "chat_volume"
+    ],
     "reviewed": true
   },
   {
@@ -904,25 +1572,53 @@
     "denominator": "total_paid_hours",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["Productive vs Paid", "PVP Affirm", "productive paid ratio", "affirm pvp"],
-    "source_fields": ["total_productive_hours", "total_paid_hours", "productive_hours", "paid_hours"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "Productive vs Paid",
+      "PVP Affirm",
+      "productive paid ratio",
+      "affirm pvp"
+    ],
+    "source_fields": [
+      "total_productive_hours",
+      "total_paid_hours",
+      "productive_hours",
+      "paid_hours"
+    ],
     "reviewed": false
   },
   {
-	  "kpi_id": "affirm_qa_score",
-	  "display_name": "QA Score (Affirm Rubric)",
-	  "description": "Simple average of QA rubric score across all evaluated Affirm Care interactions. Source column is 'rubric_score' - a numeric percentage scale, e.g. 0-1.",
-	  "numerator": "avg(rubric_score)",
-	  "denominator": "_none_",
-	  "aggregation": "average",
-	  "format": "percentage",
-	  "domain": "cx",
-	  "expected_range": {"min": 0, "max": 1},
-	  "aliases": ["QA Score","Rubric Score avg","average rubric score","Affirm QA","affirm quality score"],
-	  "source_fields": ["rubric_score","Rubric Score","qa_score","evaluation_count","score"],
-	  "reviewed": true
-	},
+    "kpi_id": "affirm_qa_score",
+    "display_name": "QA Score (Affirm Rubric)",
+    "description": "Simple average of QA rubric score across all evaluated Affirm Care interactions. Source column is 'rubric_score' - a numeric percentage scale, e.g. 0-1.",
+    "numerator": "avg(rubric_score)",
+    "denominator": "_none_",
+    "aggregation": "average",
+    "format": "percentage",
+    "domain": "cx",
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "QA Score",
+      "Rubric Score avg",
+      "average rubric score",
+      "Affirm QA",
+      "affirm quality score"
+    ],
+    "source_fields": [
+      "rubric_score",
+      "Rubric Score",
+      "qa_score",
+      "evaluation_count",
+      "score"
+    ],
+    "reviewed": true
+  },
   {
     "kpi_id": "affirm_compliance_fail_pct",
     "display_name": "Compliance Fail % (Affirm)",
@@ -931,24 +1627,51 @@
     "denominator": "total_calls",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["compliance fail", "Affirm compliance fail %", "compliance failure rate", "affirm fail rate"],
-    "source_fields": ["answer_label", "question", "total_calls", "compliance_fail_count", "call_id"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "compliance fail",
+      "Affirm compliance fail %",
+      "compliance failure rate",
+      "affirm fail rate"
+    ],
+    "source_fields": [
+      "answer_label",
+      "question",
+      "total_calls",
+      "compliance_fail_count",
+      "call_id"
+    ],
     "reviewed": false
   },
-
   {
     "kpi_id": "affirm_adherence_pct",
     "display_name": "Adherence % (Affirm)",
     "description": "Measures how closely Affirm agents followed their schedule. Calculated as total minutes in adherence divided by total monitored minutes (Min. in Adherence + Min. out Adherence).",
+    "formula": "min_in_adherence / (min_in_adherence + min_out_adherence)",
     "numerator": "min_in_adherence",
     "denominator": "min_in_adherence + min_out_adherence",
     "aggregation": "ratio_of_sums",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["Adherence %", "schedule adherence Affirm", "adherence rate", "affirm adherence"],
-    "source_fields": ["min_in_adherence", "min_out_adherence", "Min. in Adherence", "Min. out Adherence"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "Adherence %",
+      "schedule adherence Affirm",
+      "adherence rate",
+      "affirm adherence"
+    ],
+    "source_fields": [
+      "min_in_adherence",
+      "min_out_adherence",
+      "Min. in Adherence",
+      "Min. out Adherence"
+    ],
     "reviewed": true
   },
   {
@@ -960,9 +1683,24 @@
     "aggregation": "average",
     "format": "decimal",
     "domain": "cx",
-    "expected_range": { "min": 1, "max": 5 },
-    "aliases": ["CSAT Score", "Avg CSAT Rating", "average CSAT", "Affirm CSAT", "csat avg"],
-    "source_fields": ["avg_csat_rating", "Avg CSAT Rating", "csat_score", "satisfaction_score", "CSAT"],
+    "expected_range": {
+      "min": 1,
+      "max": 5
+    },
+    "aliases": [
+      "CSAT Score",
+      "Avg CSAT Rating",
+      "average CSAT",
+      "Affirm CSAT",
+      "csat avg"
+    ],
+    "source_fields": [
+      "avg_csat_rating",
+      "Avg CSAT Rating",
+      "csat_score",
+      "satisfaction_score",
+      "CSAT"
+    ],
     "reviewed": true
   },
   {
@@ -974,8 +1712,20 @@
     "format": "duration",
     "domain": "cx",
     "expected_range": null,
-    "aliases": ["AHT", "handle time", "avg handle time", "average call time"],
-    "source_fields": ["talk_time", "hold_time", "acw_time", "handle_time", "calls_handled", "aht"],
+    "aliases": [
+      "AHT",
+      "handle time",
+      "avg handle time",
+      "average call time"
+    ],
+    "source_fields": [
+      "talk_time",
+      "hold_time",
+      "acw_time",
+      "handle_time",
+      "calls_handled",
+      "aht"
+    ],
     "reviewed": true
   },
   {
@@ -986,9 +1736,23 @@
     "denominator": "total_calls",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["FCR", "first call resolution", "FCR %", "one-and-done rate"],
-    "source_fields": ["calls_resolved_first_contact", "total_calls", "fcr_flag", "repeat_contact_flag", "fcr_count"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "FCR",
+      "first call resolution",
+      "FCR %",
+      "one-and-done rate"
+    ],
+    "source_fields": [
+      "calls_resolved_first_contact",
+      "total_calls",
+      "fcr_flag",
+      "repeat_contact_flag",
+      "fcr_count"
+    ],
     "reviewed": true
   },
   {
@@ -1000,8 +1764,19 @@
     "format": "duration",
     "domain": "cx",
     "expected_range": null,
-    "aliases": ["ASA", "average wait time", "avg speed of answer", "queue time"],
-    "source_fields": ["queue_wait_time", "wait_time", "calls_answered", "speed_of_answer", "asa"],
+    "aliases": [
+      "ASA",
+      "average wait time",
+      "avg speed of answer",
+      "queue time"
+    ],
+    "source_fields": [
+      "queue_wait_time",
+      "wait_time",
+      "calls_answered",
+      "speed_of_answer",
+      "asa"
+    ],
     "reviewed": true
   },
   {
@@ -1012,9 +1787,23 @@
     "denominator": "total_calls_received",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["SL%", "service level", "SLA met %", "answered within threshold"],
-    "source_fields": ["calls_answered_within_threshold", "total_calls_received", "service_level", "sl_calls", "sl_pct"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "SL%",
+      "service level",
+      "SLA met %",
+      "answered within threshold"
+    ],
+    "source_fields": [
+      "calls_answered_within_threshold",
+      "total_calls_received",
+      "service_level",
+      "sl_calls",
+      "sl_pct"
+    ],
     "reviewed": true
   },
   {
@@ -1025,9 +1814,23 @@
     "denominator": "total_calls_handled",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["hold rate", "hold %", "on-hold rate", "calls on hold %"],
-    "source_fields": ["calls_with_hold", "hold_count", "total_calls_handled", "hold_flag", "hold_rate"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "hold rate",
+      "hold %",
+      "on-hold rate",
+      "calls on hold %"
+    ],
+    "source_fields": [
+      "calls_with_hold",
+      "hold_count",
+      "total_calls_handled",
+      "hold_flag",
+      "hold_rate"
+    ],
     "reviewed": true
   },
   {
@@ -1038,9 +1841,23 @@
     "denominator": "total_calls_handled",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["transfer rate", "transfer %", "call transfer rate", "blind transfer rate"],
-    "source_fields": ["transferred_calls", "transfer_count", "total_calls_handled", "transfer_flag", "transfer_rate"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "transfer rate",
+      "transfer %",
+      "call transfer rate",
+      "blind transfer rate"
+    ],
+    "source_fields": [
+      "transferred_calls",
+      "transfer_count",
+      "total_calls_handled",
+      "transfer_flag",
+      "transfer_rate"
+    ],
     "reviewed": true
   },
   {
@@ -1051,9 +1868,23 @@
     "denominator": "total_calls_handled",
     "format": "percentage",
     "domain": "cx",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["escalation rate", "escalation %", "supervisor escalation rate", "sup escalation"],
-    "source_fields": ["escalated_calls", "escalation_count", "total_calls_handled", "escalation_flag", "escalation_rate"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "escalation rate",
+      "escalation %",
+      "supervisor escalation rate",
+      "sup escalation"
+    ],
+    "source_fields": [
+      "escalated_calls",
+      "escalation_count",
+      "total_calls_handled",
+      "escalation_flag",
+      "escalation_rate"
+    ],
     "reviewed": true
   },
   {
@@ -1064,9 +1895,23 @@
     "denominator": "scheduled_hours",
     "format": "percentage",
     "domain": "workforce",
-    "expected_range": { "min": 0, "max": 1 },
-    "aliases": ["shrinkage", "shrinkage rate", "schedule shrinkage", "capacity loss %"],
-    "source_fields": ["scheduled_hours", "available_hours", "shrinkage_hours", "unavailable_time", "shrinkage_pct"],
+    "expected_range": {
+      "min": 0,
+      "max": 1
+    },
+    "aliases": [
+      "shrinkage",
+      "shrinkage rate",
+      "schedule shrinkage",
+      "capacity loss %"
+    ],
+    "source_fields": [
+      "scheduled_hours",
+      "available_hours",
+      "shrinkage_hours",
+      "unavailable_time",
+      "shrinkage_pct"
+    ],
     "reviewed": true
   },
   {
@@ -1078,8 +1923,19 @@
     "format": "decimal",
     "domain": "workforce",
     "expected_range": null,
-    "aliases": ["CPH", "calls per hour", "call throughput", "hourly call rate"],
-    "source_fields": ["calls_handled", "productive_hours", "calls_per_hour", "call_volume", "cph"],
+    "aliases": [
+      "CPH",
+      "calls per hour",
+      "call throughput",
+      "hourly call rate"
+    ],
+    "source_fields": [
+      "calls_handled",
+      "productive_hours",
+      "calls_per_hour",
+      "call_volume",
+      "cph"
+    ],
     "reviewed": true
   },
   {
@@ -1091,8 +1947,19 @@
     "format": "duration",
     "domain": "cx",
     "expected_range": null,
-    "aliases": ["ATT", "average talk time", "talk time per call", "conversation time"],
-    "source_fields": ["talk_time", "total_talk_time", "calls_handled", "conversation_duration", "att"],
+    "aliases": [
+      "ATT",
+      "average talk time",
+      "talk time per call",
+      "conversation time"
+    ],
+    "source_fields": [
+      "talk_time",
+      "total_talk_time",
+      "calls_handled",
+      "conversation_duration",
+      "att"
+    ],
     "reviewed": true
   },
   {
@@ -1104,8 +1971,20 @@
     "format": "duration",
     "domain": "cx",
     "expected_range": null,
-    "aliases": ["ACW", "after call work", "wrap time", "wrap rate", "post call work"],
-    "source_fields": ["acw_time", "after_call_work", "wrap_time", "calls_handled", "acw_duration"],
+    "aliases": [
+      "ACW",
+      "after call work",
+      "wrap time",
+      "wrap rate",
+      "post call work"
+    ],
+    "source_fields": [
+      "acw_time",
+      "after_call_work",
+      "wrap_time",
+      "calls_handled",
+      "acw_duration"
+    ],
     "reviewed": true
   },
   {
@@ -1116,9 +1995,39 @@
     "denominator": "total_responses",
     "format": "decimal",
     "domain": "cx",
-    "expected_range": { "min": -100, "max": 100 },
-    "aliases": ["NPS", "net promoter score", "recommend score", "loyalty score"],
-    "source_fields": ["promoter_count", "detractor_count", "total_responses", "nps_score", "recommend_score", "nps"],
+    "expected_range": {
+      "min": -100,
+      "max": 100
+    },
+    "aliases": [
+      "NPS",
+      "net promoter score",
+      "recommend score",
+      "loyalty score"
+    ],
+    "source_fields": [
+      "promoter_count",
+      "detractor_count",
+      "total_responses",
+      "nps_score",
+      "recommend_score",
+      "nps"
+    ],
+    "reviewed": true
+  },
+  {
+    "kpi_id": "custom_1781679689540",
+    "display_name": "QA Volume-Affrim",
+    "description": "QA Volume count  ",
+    "formula": "COUNT(agent_email)",
+    "format": "decimal",
+    "domain": "custom",
+    "aggregation": "sum",
+    "expected_range": null,
+    "aliases": [],
+    "source_fields": [
+      "agent_email"
+    ],
     "reviewed": true
   }
 ]

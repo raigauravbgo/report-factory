@@ -184,6 +184,10 @@ export default function DashboardPage() {
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
   const [zoomState, setZoomState] = useState<Record<string, { start: number; end: number }>>({});
   const [activeGranularity, setActiveGranularity] = useState<string | null>(null);
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateSaved, setTemplateSaved] = useState(false);
 
   function getZoom(kpiName: string, dataLength: number) {
     return zoomState[kpiName] ?? { start: 0, end: Math.max(0, dataLength - 1) };
@@ -286,6 +290,29 @@ export default function DashboardPage() {
       URL.revokeObjectURL(url);
     } catch (e) { setError(String(e)); }
     finally { setExportingPptx(false); }
+  }
+
+  async function handleSaveTemplate() {
+    if (!templateName.trim()) return;
+    setSavingTemplate(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/templates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipe_id: Number(recipeId), name: templateName.trim() }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail || `API ${res.status}`);
+      }
+      setTemplateSaved(true);
+      setShowSaveTemplate(false);
+      setTemplateName("");
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Failed to save template");
+    } finally {
+      setSavingTemplate(false);
+    }
   }
 
   if (loading) return (
@@ -496,6 +523,12 @@ export default function DashboardPage() {
           >
             ✎ Edit
           </button>
+          <button
+            onClick={() => { setShowSaveTemplate(true); setTemplateSaved(false); }}
+            className="flex items-center gap-1.5 rounded-lg bg-[#00B5AD] hover:bg-[#00B5AD]/90 text-white px-3.5 py-2 text-[11px] font-semibold transition-all"
+          >
+            {templateSaved ? "✓ Saved" : "⊕ Save as Template"}
+          </button>
         </div>
       </div>
 
@@ -687,6 +720,48 @@ export default function DashboardPage() {
           </span>
         </div>
       </div>
+
+      {/* Save as Template modal */}
+      {showSaveTemplate && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h2 className="text-ink font-bold text-[16px] mb-1">Save as Template</h2>
+            <p className="text-mist text-[12px] mb-5">
+              Give this dashboard configuration a name. Next time you upload similar files,
+              you can reuse it and skip straight to the dashboard.
+            </p>
+            <label className="block text-[11px] font-semibold text-dim mb-1.5">Template name</label>
+            <input
+              type="text"
+              autoFocus
+              placeholder="e.g. QA Monthly Report"
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveTemplate(); if (e.key === "Escape") setShowSaveTemplate(false); }}
+              className="w-full border border-rim rounded-lg px-3 py-2.5 text-[13px] text-ink focus:outline-none focus:border-signal mb-2"
+            />
+            <p className="text-[10px] text-mist mb-5">
+              Saves: {data?.config?.kpis?.length ?? 0} KPIs · {data?.config?.dimensions?.length ?? 0} dimensions ·
+              {data?.config?.filters?.length ?? 0} filters · {data?.config?.date_column} · {data?.config?.granularity}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowSaveTemplate(false)}
+                className="px-4 py-2 text-[12px] text-mist hover:text-dim transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveTemplate}
+                disabled={savingTemplate || !templateName.trim()}
+                className="px-5 py-2 bg-signal hover:bg-signal/90 disabled:opacity-50 text-white text-[12px] font-semibold rounded-lg transition-colors"
+              >
+                {savingTemplate ? "Saving…" : "Save Template"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
