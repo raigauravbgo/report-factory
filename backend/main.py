@@ -30,6 +30,8 @@ import models.kpi_definition  # noqa
 import models.dashboard_config  # noqa
 import models.custom_kpi_proposal  # noqa
 import models.report_template  # noqa
+import models.llm_call_log  # noqa
+import models.agent_trace_event  # noqa
 
 app = FastAPI(
     title="BGO Report Factory",

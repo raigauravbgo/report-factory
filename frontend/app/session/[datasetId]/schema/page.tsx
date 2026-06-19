@@ -37,6 +37,7 @@ export default function SchemaPage() {
   const sheetChangingRef = useRef(false); // synchronous guard; state alone has async update lag
   const [relationships, setRelationships] = useState<RelationshipSuggestion[]>([]);
   const [relLoading, setRelLoading] = useState(false);
+  const [relConfirmed, setRelConfirmed] = useState(false);
   const [vdBuilding, setVdBuilding] = useState(false);
   const [vdResult, setVdResult] = useState<{ columns: string[]; row_count: number } | null>(null);
   const [vdError, setVdError] = useState<string | null>(null);
@@ -141,7 +142,10 @@ export default function SchemaPage() {
 
   function handleConfirmRelationships(confirmed: RelationshipSuggestion[]) {
     sessionStorage.setItem(`dataset_${datasetId}_relationships`, JSON.stringify(confirmed));
-    setRelationships(confirmed);
+    // Do NOT call setRelationships(confirmed) here. SchemaRelationships tracks checked
+    // state by index — shrinking the suggestions list shifts indices and causes previously
+    // confirmed items to appear unchecked on the next render.
+    setRelConfirmed(true);
   }
 
   async function handleNavigate(to: string) {
@@ -415,6 +419,22 @@ export default function SchemaPage() {
               <div className="flex items-center gap-2 text-[12px] text-dim">
                 <span className="animate-spin h-4 w-4 border-2 border-signal border-t-transparent rounded-full flex-shrink-0" />
                 Detecting relationships…
+              </div>
+            ) : relConfirmed ? (
+              <div className="flex items-center gap-2 rounded-lg border border-green-100 bg-green-50 px-4 py-3 text-xs text-green-700">
+                <svg className="h-4 w-4 flex-shrink-0" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
+                  <path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>
+                  Relationships confirmed and saved.{" "}
+                  <button
+                    onClick={() => setRelConfirmed(false)}
+                    className="underline underline-offset-2 hover:text-green-800"
+                  >
+                    Edit
+                  </button>
+                </span>
               </div>
             ) : (
               <SchemaRelationships

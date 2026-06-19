@@ -5,18 +5,18 @@ pydantic==2.13.4
 pydantic-settings==2.14.1
 python-multipart==0.0.29
 httpx==0.28.1
+python-dotenv==1.2.2
 
 # ── AI — Agent & LLM providers ───────────────────────────────────────────────
 google-adk==2.1.0
 litellm==1.85.0
-
-# litellm==1.83.7
-anthropic==0.105.2
 openai==2.37.0
-# openai==2.30.0
+anthropic==0.105.2
+tiktoken==0.13.0
 
 # ── Data processing ───────────────────────────────────────────────────────────
 pandas==2.3.0
+numpy==2.4.6
 openpyxl==3.1.5
 chardet==5.2.0
 
@@ -36,3 +36,6 @@ python-jose[cryptography]==3.5.0
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 asteval==1.0.8
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==9.1.0

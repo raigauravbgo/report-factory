@@ -114,6 +114,7 @@ export interface InterviewResponse {
   step_label: string;
   completed: boolean;
   interview_result: InterviewResult | null;
+  is_adk_mode?: boolean;
 }
 
 // ── Session (multi-file flow) ─────────────────────────────────────────────────

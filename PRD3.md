@@ -1,6 +1,6 @@
 # BGO Report Factory — Product Requirements Document
 
-**Version:** 3.0  
+**Version:** 3.1  
 **Owner:** Data & AI Platform  
 **Last updated:** June 2026  
 **Philosophy:** MVP is live. Prove the loop with real clients. Harden and scale next.
@@ -11,11 +11,11 @@
 
 | | Current State | Next Phase |
 |---|---|---|
-| **Status** | Multi-file pipeline end-to-end complete | Production hardening + Flow 2 interview |
+| **Status** | Multi-file pipeline end-to-end complete + ADK agent interview live | Production hardening + PostgreSQL |
 | **Infrastructure** | Railway (FastAPI + Next.js + SQLite) | PostgreSQL + S3 on Railway |
 | **Who uses it** | Internal BGO ops users | Same + SSO onboarding |
 | **Setup** | `uvicorn main:app` + `npm run dev` | No change |
-| **Pipeline** | 9-step multi-file flow | Same + scheduled refresh |
+| **Pipeline** | 9-step multi-file flow + AI-guided (ADK) shortcut | Same + scheduled refresh |
 
 ---
 
@@ -25,7 +25,12 @@ BGO's central data team is the single bottleneck for all operational reporting. 
 
 **The goal:** A self-serve web app where any BGO user uploads their data and gets a live interactive dashboard and/or PowerPoint deck — without raising a ticket. The central team shifts from builders to reviewers.
 
-**Where we are today:** The core loop is working. A user can upload up to 10 CSV/Excel files simultaneously, watch the AI profile and relate them, answer 5 interview questions, select KPIs, choose breakdown dimensions, and have a story-driven dashboard in under 10 minutes. The Virtual Dimension builder handles the common case where no Roster/dimension file was uploaded — extracting shared agent attributes from fact tables automatically.
+**Where we are today:** The core loop is working and extended. A user can upload up to 10 CSV/Excel files simultaneously, watch the AI profile and relate them, then choose between two interview paths:
+
+- **Flow 1 (step-by-step):** Answer 5–6 structured questions, select KPIs, choose dimensions, generate dashboard — approximately 10 minutes.
+- **ADK Agent (AI-guided):** A conversational AI agent handles the entire flow — data discovery, interview, KPI selection, dimension selection, and dashboard generation — all in one chat session. The dashboard is generated without leaving the interview page.
+
+The Virtual Dimension builder handles the common case where no Roster/dimension file was uploaded — extracting shared agent attributes from fact tables automatically.
 
 ---
 
@@ -33,7 +38,7 @@ BGO's central data team is the single bottleneck for all operational reporting. 
 
 This product is described as a reporting tool. It is more than that.
 
-**This is the first surface of the BGO AI Platform.** Every component built here — the KPI catalog, the schema memory pattern, the review queue, the multi-file join logic — becomes foundation that subsequent agents inherit from. The KPI catalog is the compounding moat: every reviewed KPI is proprietary BGO IP that maps directly to BGO's domain expertise in collections, CX, and ops. After 500 reviewed reports, this is genuinely defensible IP.
+**This is the first surface of the BGO AI Platform.** Every component built here — the KPI catalog, the schema memory pattern, the review queue, the multi-file join logic, the observability layer — becomes foundation that subsequent agents inherit from. The KPI catalog is the compounding moat: every reviewed KPI is proprietary BGO IP that maps directly to BGO's domain expertise in collections, CX, and ops.
 
 **Discipline implications for the build team.** The schema memory data model, the KPI catalog format, and the cardinality-based dimension inference algorithm must remain stable — every future agent reads from them. The anti-hardcoding principle (cardinality-based join keys, no column name assumptions) is not optional — it is what makes the tool work for any client's file format.
 
@@ -63,21 +68,25 @@ The entire product is one pipeline. Every decision should serve the end-to-end f
          ↓
 3. Schema Mapping            User confirms types, overrides table classification (fact/dimension)
                              Build Virtual Dimension if no Roster file uploaded
+                             Confirm cross-file relationships (saved to sessionStorage; UI shows
+                             green "confirmed" banner — does not mutate the displayed list)
          ↓
 4. Relationship Detection    AI infers FK, same-dimension, shared-key links across files
          ↓
-5. AI Interview (optional)   5-question Q&A captures domain, date column, granularity, filters
+5. AI Interview (optional)   Two modes — Flow 1 step-by-step OR ADK agent (full chat flow)
          ↓
 6. KPI Selection             AI suggests formulas from columns; user selects and orders
+                             (bypassed when ADK agent handles the full session)
          ↓
 7. Dimension Selection       User picks which categorical columns drive breakdown charts
+                             (bypassed when ADK agent handles the full session)
          ↓
 8. Data Validation           Pre-flight: null %, division-risk, grain duplicate checks
          ↓
 9. Dashboard Generation      Story sections (AI-grouped KPIs) + filter bar + export
 ```
 
-Interview (Step 5) is optional — users may skip to KPI selection directly.
+Interview (Step 5) is optional — users may skip to KPI selection directly. When the ADK agent is enabled, steps 6 and 7 happen inside the chat conversation; the wizard pages are bypassed.
 
 ---
 
@@ -97,10 +106,11 @@ Interview (Step 5) is optional — users may skip to KPI selection directly.
 | AI — alternate | Anthropic `claude-sonnet-4-20250514` | `LLM_PROVIDER=anthropic` |
 | AI — azure | Azure OpenAI | `LLM_PROVIDER=azure` |
 | Charts | Recharts 3.8 | |
+| Markdown rendering | react-markdown | Interview chat — renders ADK agent responses |
 | Export | openpyxl 3.1 (Excel) + python-pptx 1.0 (PPTX) | |
 | Deployment | Railway | |
 
-All AI calls are routed through `backend/services/ai_client.py`. Switch provider via `.env` only — no code changes required.
+All AI calls are routed through `backend/services/ai_client.py`. Every call is logged to `llm_call_logs` via `services/observability.py`. Switch provider via `.env` only — no code changes required.
 
 ### 4.2 Setup
 
@@ -122,58 +132,82 @@ npm run dev   # port 3000
 
 Open `localhost:3000`. Upload files at `/upload`. Done.
 
+**ADK agent (optional):** Set `ADK_ENABLED=true`, `ADK_PROVIDER=openai`, `ADK_MODEL=gpt-4o-mini` in `.env`. When enabled, the session interview uses the AI agent to complete the entire flow in chat. Disable to revert to the Flow 1 step-by-step interview.
+
 ### 4.3 Project Structure
 
 ```
 report-factory/
 ├── backend/
-│   ├── main.py                           FastAPI app entry point
-│   ├── agent/report_factory_agent/       ADK agent (Flow 2, not yet active in prod)
+│   ├── main.py                           FastAPI app entry point; imports all models for create_all
+│   ├── agent/report_factory_agent/       ADK agent (9 tools; enabled via ADK_ENABLED=true)
+│   │   ├── agent.py                      root_agent; plain-language instructions (no markdown headers)
+│   │   └── tools/
+│   │       ├── intake.py                 run_intake() — legacy single-file
+│   │       ├── define_kpi.py             run_define_new_kpi() — custom KPI creation
+│   │       ├── data_discovery.py         run_data_discovery() — file-path discovery
+│   │       ├── data_discovery_from_upload.py  run_data_discovery_from_upload() — staging profile bridge
+│   │       ├── standardise.py            run_standardise() — legacy single-file
+│   │       ├── generate.py               run_generate() — legacy single-file
+│   │       ├── session_kpi_suggest.py    run_session_kpi_suggest() — multi-file KPI suggestions
+│   │       ├── session_dimensions.py     run_session_dimensions() — multi-file dimension list
+│   │       └── session_generate.py       run_session_generate() — multi-file dashboard generation
 │   ├── api/routes/                       upload, session, interview, kpis, reports,
-│   │                                     dashboard, log
+│   │                                     dashboard, templates, log
 │   ├── catalog/
-│   │   ├── kpis.json                     86 KPI definitions
-│   │   └── templates/                    4 templates
+│   │   ├── kpis.json                     87 KPI definitions
+│   │   └── templates/                    4 chart templates
 │   ├── core/                             config.py, database.py
-│   ├── models/                           Dataset, Upload, StagingTable, ReportRecipe,
-│   │                                     ProcessedTable, KpiDefinition, DashboardConfig
+│   ├── models/
+│   │   ├── dataset.py                    Dataset — batch upload session
+│   │   ├── upload.py                     Upload — one file per row
+│   │   ├── staging_table.py              StagingTable — profile JSON + physical table name
+│   │   ├── report_recipe.py              ReportRecipe — generated recipe config
+│   │   ├── kpi_definition.py             KpiDefinition — per-recipe KPI rows
+│   │   ├── dashboard_config.py           DashboardConfig — mutable overlay on recipe
+│   │   ├── processed_table.py            ProcessedTable — legacy post-compute results
+│   │   ├── custom_kpi_proposal.py        CustomKpiProposal — AI KPIs pending approval
+│   │   ├── report_template.py            ReportTemplate — saved template + column fingerprints
+│   │   ├── llm_call_log.py               LlmCallLog — per-call LLM audit log (prompt hashed)
+│   │   └── agent_trace_event.py          AgentTraceEvent — per-step ADK pipeline trace
 │   ├── services/
-│   │   ├── ai_client.py                  LLM provider abstraction (OpenAI/Anthropic/Azure)
-│   │   ├── ai_interview.py               Flow 1 hybrid interview (5 questions)
-│   │   ├── profiler.py                   Column type detection, grain_score, semantic_tag,
-│   │   │                                 _is_metric_name() metric keyword fix
+│   │   ├── ai_client.py                  LLM provider abstraction; logs every call via observability
+│   │   ├── observability.py              log_llm_call() + create_trace_event(); fire-and-forget
+│   │   ├── ai_interview.py               Flow 1 hybrid interview
+│   │   ├── adk_runner.py                 ADK Runner + InMemorySessionService wrapper
+│   │   ├── profiler.py                   Column type detection, grain_score, _is_metric_name() fix
 │   │   ├── schema_relationships.py       Cross-file FK/join inference
 │   │   ├── kpi_suggester.py              AI-first KPI identification + catalog fallback
 │   │   ├── virtual_dimension.py          Synthetic dimension from shared fact columns
-│   │   ├── compute.py                    Formula execution, cross-file JOINs,
-│   │   │                                 same-dimension enrichment, filter computation
+│   │   ├── compute.py                    Formula execution, cross-file JOINs, DF cache
 │   │   ├── data_validator.py             Pre-dashboard data quality checks
 │   │   ├── session_generator.py          Multi-file story-driven recipe generation
 │   │   ├── parser.py                     CSV + Excel ingestion
 │   │   ├── storage.py                    Local/S3 abstraction
 │   │   └── recipe_generator.py           LEGACY — single-file only
-│   ├── tests/                            37 tests across 4 files (all passing)
+│   ├── tests/                            58 tests (all passing)
 │   ├── exporters/pptx_exporter.py
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
     ├── app/
-    │   ├── upload/page.tsx               Multi-file batch upload + per-file status
+    │   ├── upload/page.tsx               Multi-file batch upload + template matching
     │   ├── session/[datasetId]/
-    │   │   ├── schema/page.tsx           Schema mapping, table-type override,
-    │   │   │                             Virtual Dimension builder, relationships
-    │   │   ├── interview/page.tsx        Hybrid Flow 1 chatbot
-    │   │   ├── kpis/page.tsx             AI-suggested KPI selection + custom builder
-    │   │   └── dimensions/page.tsx       Breakdown dimension selection
+    │   │   ├── schema/page.tsx           Schema mapping, table-type, VD builder, relationships
+    │   │   ├── review/page.tsx           Template fast-path review page
+    │   │   ├── interview/page.tsx        Dual-mode: Flow 1 step counter OR ADK agent chat
+    │   │   ├── kpis/page.tsx             KPI selection (Flow 1 path)
+    │   │   └── dimensions/page.tsx       Dimension selection (Flow 1 path)
     │   ├── dashboard/[recipeId]/page.tsx Story sections + filter bar + export
     │   └── review-queue/page.tsx         Central team review interface
     ├── components/
+    │   ├── SchemaRelationships.tsx       Relationship confirm: saves to sessionStorage only
     │   ├── filters/FilterBar.tsx         Dimension/filter dropdown bar
     │   ├── ui/                           ChartCard, InsightPanel, SectionHeader, TrendBadge
     │   └── kpis/KpiSummaryCard.tsx
     └── lib/
         ├── api.ts                        All API client calls
-        ├── types.ts                      TypeScript types
+        ├── types.ts                      TypeScript types (InterviewResponse.is_adk_mode)
         └── format.ts                     Number/date formatting
 ```
 
@@ -218,6 +252,8 @@ report-factory/
 ### Step 1 — Multi-File Upload
 User uploads 1–10 CSV or Excel files simultaneously. Each file is parsed in the background. Upload limits: 200k rows, 50 MB, 200 columns per file. CSV encoding auto-detected via `chardet` + `csv.Sniffer` — never assumed comma-separated.
 
+After all files are profiled, the upload page checks for saved templates at ≥ 95% column overlap. A match offers a "Use Template" shortcut that jumps to the Review page, bypassing Steps 5–8.
+
 ### Step 2 — Deep Profiling
 Per file, per column: `detected_type` (date/numeric/categorical/text), `suggested_role` (date/dimension/measure), `grain_score` (unique_count ÷ row_count), `semantic_tag` (entity_key/time_key/financial_metric/etc.), sample values, null %, duplicate row count.
 
@@ -228,19 +264,37 @@ User reviews auto-classification in a tabbed per-file UI. Key capabilities:
 - Override column role and semantic tag per column
 - Override table type: **fact**, **dimension**, or **unknown** (AI-suggested, user-editable). Stored in `StagingTable.profile_data["table_type"]`.
 - **Virtual Dimension Builder**: When all uploaded files are classified as fact/unknown, an amber prompt offers to build a synthetic dimension table from non-numeric columns shared across 2+ fact tables. Entity key = highest-cardinality shared column (purely data-driven, no name assumptions). Single-file mode applies a stability filter — only columns with ≤ 1 unique value per entity group are kept (e.g., agent name is stable across evaluations; rubric name is not).
-- Detected relationships are auto-saved to sessionStorage on page load.
+- **Relationship confirmation**: User confirms detected cross-file joins. Confirmed list is saved to `sessionStorage`. The component does **not** mutate its own suggestion list after confirm (that would shift indices and cause a subsequent confirm to silently drop items). Instead, a green "confirmed" banner replaces the checklist, with an "Edit" link to reopen it.
 
 ### Step 4 — Relationship Detection
 AI infers cross-file links: `pk_fk` (entity joins), `same_dimension` (same column role + tag), `shared_key` (value overlap). Confidence scored 0–1; threshold 0.6. User reviews and confirms relationships before dashboard generation.
 
 ### Step 5 — AI Interview (optional)
-5-question conversational Q&A via a side-panel chatbot. Q1 is hard-coded: "What type of data does this represent?" Q2–Q5 are AI-generated from column profiles (domain, date column, granularity, filters). Answers drive the recipe config. User may skip — defaults are inferred from column profiles.
+
+**Two modes — chosen by `ADK_ENABLED` in `.env`:**
+
+**Flow 1 (step-by-step):** Side-panel chatbot. "Data Interview" header with "Question X of 6" step counter and teal progress bar. Q1 is hard-coded: "What type of data does this represent?" Q2–Q6 are AI-generated from column profiles (domain, date column, granularity, filters). Answers drive the recipe config. User may skip at any time. On completion: "Continue to KPI Selection →" footer.
+
+**ADK Agent (AI-guided):** A conversational agent handles data discovery through dashboard generation in one chat. "AI-Guided Dashboard Setup" header with an "AI Agent active" badge and an indeterminate indigo progress bar. The agent:
+1. Calls `run_data_discovery_from_upload` to inspect the data, then greets the user with a plain-text summary
+2. Asks up to 6 questions in natural batches (not as a rigid numbered list)
+3. Calls `run_session_kpi_suggest` — presents KPI list for user confirmation
+4. Calls `run_session_dimensions` — presents dimension list for confirmation
+5. Calls `run_session_generate` — creates the recipe
+6. Backend detects the new recipe via DB-poll and returns `completed=true, recipe_id=N`
+7. Frontend shows "View Dashboard →" button (no auto-redirect — user can read the agent's final message first)
+
+If ADK fails at any point, the session route silently falls back to Flow 1 and writes an `error` agent trace event. The UI stays in ADK mode (badge remains) — the `is_adk_mode` flag is locked on first response.
 
 ### Step 6 — KPI Selection
 AI suggests KPIs by sending column names + sample rows to the LLM. The LLM returns full KPI definitions with formula, aggregation type, and display format. `SequenceMatcher` against `catalog/kpis.json` is the fallback when AI fails (threshold 0.55). **KPI suggestions are scoped to the files in the current session** — different file combinations yield different suggestions. User selects, reorders (drag-to-priority), and can add custom KPIs with name + formula.
 
+*This step is bypassed when the ADK agent handles the session — KPI selection happens inside the chat conversation.*
+
 ### Step 7 — Dimension Selection
 User picks which categorical columns drive breakdown charts. Two-panel UI (available vs. selected). Columns are grouped by source file and show cardinality badges and sample values. First selected dimension is designated "Primary" for default breakdowns.
+
+*This step is bypassed when the ADK agent handles the session — dimension selection happens inside the chat conversation.*
 
 ### Step 8 — Data Validation
 Pre-flight checks before recipe creation: denominator column null % (>80% → error, >20% → warning), grain key duplicates (>5% → error), measure column null % (>20% → warning), division-by-zero risk. Non-blocking — warnings are surfaced but do not prevent generation.
@@ -275,7 +329,7 @@ All entity/join key detection is:
 
 ## 8. KPI Catalog
 
-The catalog is a strategic asset — proprietary BGO IP defining how BGO measures collections, CX, and operational performance. 86 KPIs currently defined.
+The catalog is a strategic asset — proprietary BGO IP defining how BGO measures collections, CX, and operational performance. 87 KPIs currently defined.
 
 **Format (one entry):**
 
@@ -327,44 +381,47 @@ Skip human review when ALL are true:
 - No data quality flags raised in Step 8
 - Template type and KPI list unchanged from last approved run
 
-The data model already supports this — `schema_memory.use_count` tracks usage, and validation already produces the flags needed for the gate.
-
 ---
 
 ## 10. Frontend Screens
 
 ### Upload (`/upload`)
-Drag-and-drop zone accepting up to 10 CSV/Excel files simultaneously. Per-file status badges (uploading / profiling / ready / error). Dataset name input. "Continue to Schema" when all files are ready.
+Drag-and-drop zone accepting up to 10 CSV/Excel files simultaneously. Per-file status badges (uploading / profiling / ready / error). Dataset name input. After profiling: template match check. "Use Template" button (if match) or "Continue to Schema" (standard path).
 
 ### Schema Mapping (`/session/[id]/schema`)
-Tabbed per-file view. Each tab shows: table type selector (Fact / Dimension / Unknown), column table with role + semantic tag overrides, grain score. Relationship suggestions panel. When all files are fact/unknown: amber "No dimension table detected" notice with "Build Virtual Dimension" button. On VD success: green banner with row count + extracted column list. On failure: error message with retry. "Continue to Interview" button.
+Tabbed per-file view. Each tab shows: table type selector (Fact / Dimension / Unknown), column table with role + semantic tag overrides, grain score. Relationship suggestions panel. When all files are fact/unknown: amber "No dimension table detected" notice with "Build Virtual Dimension" button. On VD success: green banner with row count + extracted column list. Relationship confirm replaces the checklist with a green "confirmed" banner; "Edit" link reopens it.
 
 ### Interview (`/session/[id]/interview`)
-Side-panel chatbot. Progress stepper (1/5 → 5/5). Conversational turns stored in sessionStorage across refreshes. "Skip Interview" link always visible. Submits `InterviewResult` (domain, date_column, kpis[], dimensions[], granularity, filters[]).
+
+**Flow 1 mode:** Side-panel chatbot, "Data Interview" header, "Question X of 6" step counter, teal progress bar. "Skip Interview" link visible. On completion: "Continue to KPI Selection →" footer.
+
+**ADK Agent mode:** "AI-Guided Dashboard Setup" header, pulsing "AI Agent active" badge, indeterminate indigo progress bar. Assistant messages rendered as Markdown (bold, lists, code spans). Wider chat bubbles for richer agent output. On completion: dark "View Dashboard →" footer.
 
 ### KPI Selection (`/session/[id]/kpis`)
-AI-suggested KPI cards grouped by domain (collections / CX / sales / workforce / ops / custom). Confidence badges (green ≥0.85, amber ≥0.65). Drag-to-reorder selected KPIs for priority ranking. Custom KPI builder (name + formula). "Continue" shows count of selected KPIs.
+*(Flow 1 path — bypassed in ADK mode)*  
+AI-suggested KPI cards grouped by domain. Confidence badges. Drag-to-reorder. Custom KPI builder. "Continue" shows count of selected KPIs.
 
 ### Dimension Selection (`/session/[id]/dimensions`)
-Two-panel layout: available (grouped by source file with cardinality badges and sample values) / selected (with "Primary" badge on first). Pre-selected from interview answers if available. "Generate Dashboard" button.
+*(Flow 1 path — bypassed in ADK mode)*  
+Two-panel layout: available (grouped by source file with cardinality badges) / selected (with "Primary" badge on first). "Generate Dashboard" button.
 
 ### Dashboard (`/dashboard/[recipeId]`)
-**Filter bar** at top: dimension + filter column dropdowns, "Clear all" action, teal highlight on active filter.
+**Filter bar** at top: dimension + filter column dropdowns, "Clear all" action.
 
-**KPI Summary Cards** grid: colored value tile (blue/teal/amber cycling), formula in monospace, trend badge, null-value amber warning state.
+**KPI Summary Cards** grid: colored value tile, formula in monospace, trend badge, null-value amber warning state.
 
-**Story sections** (when `config.sections` present): KPIs grouped by business theme with section title. Each section contains its own time-series trend chart and breakdown bar chart. Falls back to flat layout for legacy single-file recipes without sections.
+**Story sections** (when `config.sections` present): KPIs grouped by business theme with section title. Each section contains its own time-series trend chart and breakdown bar chart. Falls back to flat layout for legacy single-file recipes.
 
-**Trend charts**: Interactive Recharts LineChart with Brush zoom component, granularity toggle (daily/weekly/monthly), takeaway text per chart.
+**Trend charts**: Interactive Recharts LineChart with Brush zoom component, granularity toggle (daily/weekly/monthly).
 
-**Breakdown charts**: Recharts BarChart, top performer callout, formatted axis values by KPI formula type.
+**Breakdown charts**: Recharts BarChart, top performer callout.
 
-**Insights panel**: Finding → Narrative → Decision entries, severity-colored (critical/high/medium/low).
+**Insights panel**: Finding → Narrative → Decision entries, severity-colored.
 
-**Export**: Excel (.xlsx) and PowerPoint (.pptx) buttons. Approval badge when recipe is approved.
+**Export**: Excel (.xlsx) and PowerPoint (.pptx) buttons.
 
 ### Review Queue (`/review-queue`)
-Central team only. List of pending items sorted by created_at. Click to open: mapping summary + flags + dashboard preview + PPTX/Excel links. Approve / Approve with edits / Reject.
+Central team only. List of pending items sorted by created_at. Approve / Approve with edits / Reject.
 
 ---
 
@@ -381,7 +438,9 @@ PATCH  /upload/{id}/table-type            Override AI table classification (fact
 
 # Session (multi-file flow)
 POST   /session/{id}/relationships        Infer cross-file relationships
-POST   /session/{id}/interview            Flow 1 hybrid interview turn
+POST   /session/{id}/interview            ADK agent or Flow 1 interview turn
+                                          Response: {message, step_index, step_label,
+                                                    completed, interview_result, is_adk_mode}
 GET    /session/{id}/interview/state      Current step + collected answers
 POST   /session/{id}/interview/skip       Skip interview → default result
 POST   /session/{id}/kpi-suggestions      AI-suggest KPIs from column profiles
@@ -393,7 +452,16 @@ POST   /session/{id}/virtual-dimension    Build + store virtual dimension
 POST   /session/{id}/validate             Pre-dashboard data validation
 POST   /session/{id}/generate             Create recipe → recipe_id
 
+# Report Templates
+POST   /api/templates                     Save recipe as reusable template
+GET    /api/templates                     List saved templates
+POST   /api/templates/match              Match files to templates at ≥ 95% column overlap
+GET    /api/templates/{id}               Get single template
+PUT    /api/templates/{id}               Update template (permanent override)
+DELETE /api/templates/{id}               Delete template
+
 # Dashboard
+GET    /api/dashboard                     List all dashboards (prefetched, no N+1)
 GET    /api/dashboard/{id}/data           Full dashboard data with filter support
 GET    /api/dashboard/{id}/filter-values  Populate filter dropdowns
 GET    /api/dashboard/{id}/export/excel   Download .xlsx
@@ -406,6 +474,9 @@ PATCH  /api/dashboard/{id}/config            Update granularity, dimensions, fil
 GET/POST /api/kpis
 GET      /api/kpis/{id}
 POST     /api/kpis/{id}/review
+GET      /api/kpis/custom                 List custom proposals (status filter)
+POST     /api/kpis/custom/{id}/approve    Approve: write kpis.json + DB commit
+POST     /api/kpis/custom/{id}/reject     Reject
 
 # Reports + Review Queue
 POST   /api/reports
@@ -443,6 +514,27 @@ POST   /api/log/event
 
 **`DashboardConfig`** — Mutable override layer on top of ReportRecipe.config.
 
+**`CustomKpiProposal`** — AI-generated KPI pending ops approval. Status: `pending` | `approved` | `rejected`.
+
+**`ReportTemplate`** — Saved template config + per-file column fingerprints for overlap matching.
+
+### Observability Models
+
+**`LlmCallLog`** — Written by `ai_client.py` for every LLM call across all services:
+- `provider`, `model`, `task_type`
+- `prompt_hash` — SHA-256 first 16 hex chars (raw prompt is **never** stored)
+- `input_token_estimate`, `output_token_estimate` — `len(text) // 4` approximation
+- `latency_ms`, `status` (success/error), `error_message`
+
+**`AgentTraceEvent`** — Written by ADK session tools and `session.py` ADK branch:
+- `run_id` — `"session_{dataset_id}"`
+- `step_name` — `"interview_turn"` | `"kpi_suggest"` | `"dimensions"` | `"generate"`
+- `skill_name` — exact function called
+- `status` — `success` | `warning` | `pending` | `error` | `blocked`
+- `confidence` — 0–1 quality score where applicable
+- `evidence_json` — structured metadata (counts, column names) — no raw uploaded data
+- `requires_review` — flagged when a human should inspect
+
 ### Schema Memory
 
 On recipe approval, `schema_memory` saves the column mapping keyed by `(client_id, template_type)`. Second run with the same client + template loads the saved mapping and skips fuzzy matching.
@@ -455,12 +547,22 @@ When writing a staging table via pandas `to_sql`, always call `db.commit()` firs
 
 ## 13. Test Suite
 
-37 backend tests, all passing. Run with `pytest tests/ -v` from `backend/`.
+58 backend tests, all passing. Run with the project virtualenv:
+
+```bash
+# Windows
+backend\new-env\Scripts\python.exe -m pytest backend\tests\ -v
+
+# macOS/Linux
+cd backend && pytest tests/ -v
+```
 
 | File | Tests | Coverage |
 |---|---|---|
-| `test_compute_per_kpi_filter.py` | 16 | Same-dimension enrichment, join key selection, cross-name value-overlap, LEFT JOIN dedup guard, 3-table datasets, table classification |
+| `test_compute_per_kpi_filter.py` | 25 | Same-dimension enrichment, join key selection, cross-name value-overlap, LEFT JOIN dedup guard, 3-table datasets, table classification, relationship enrichment, PK/FK direction auto-flip |
+| `test_get_dimensions.py` | 8 | 4-branch priority (virtual → real dim → shared → fallback), table_count badge, excluded semantic tags, sort order |
 | `test_profiler_classify.py` | 6 | `csat_score` binary→measure, `avg_csat_rating`→measure, `is_deleted` stays categorical, `adherence_pct`→measure |
+| `test_schema_relationships.py` | 4 | Same-name relationship detection, cross-name value-overlap detection, no false positive below threshold |
 | `test_virtual_dimension.py` | 12 | Common col inclusion, numeric exclusion, no-common→None, deduplication, entity key by cardinality, single-table stability filter, name-agnostic key detection |
 | `test_virtual_dimension_endpoint.py` | 3 | StagingTable `table_type="virtual_dimension"`, None for no common cols, physical table readable |
 
@@ -475,7 +577,7 @@ The agent logic, KPI catalog, templates, and frontend are identical between dev 
 | Database | SQLite | PostgreSQL (`DATABASE_URL` swap — no code changes) |
 | File storage | Local `/local_uploads` | AWS S3 (`S3_BUCKET` + boto3 — one config line) |
 | Deployment | Railway | Railway (same) or AWS ECS |
-| Observability | Logging | Langfuse (replace log writes with trace calls) |
+| Observability | `llm_call_logs` + `agent_trace_events` tables | Add Langfuse tracing alongside existing tables |
 | Column matching | SequenceMatcher | pgvector semantic search |
 | Auth | None | BGO SSO (SAML/OAuth2 FastAPI middleware) |
 | Workday | Excel export interim | Airbyte connector |
@@ -487,7 +589,6 @@ The agent logic, KPI catalog, templates, and frontend are identical between dev 
 
 ## 15. What Is Not Supported (Current Phase)
 
-- **Flow 2 dynamic interview** — ADK agent-driven Q&A. Do NOT start until Flow 1 is end-to-end tested with real users.
 - **Scheduled refresh** — user-triggered only; no cron runs
 - **PDF export** — PPTX and Excel only
 - **Multi-hop joins** — only single-level fact → dimension; remaining tables concatenated
@@ -496,6 +597,7 @@ The agent logic, KPI catalog, templates, and frontend are identical between dev 
 - **Hierarchical dimensions** — flat grouping only
 - **Client-facing portal** — internal BGO users only in Phase 1
 - **Hunter Point Capital deployment** — after MVP exit gate with BGO internal users
+- **SSO / authentication** — python-jose installed but not yet wired
 
 ---
 
@@ -504,8 +606,8 @@ The agent logic, KPI catalog, templates, and frontend are identical between dev 
 **Phase 2 — Production infrastructure + expanded connectors**  
 PostgreSQL + S3. Workday API direct. TCM telephony connector. CRM connector. Langfuse observability. SSO onboarding. Scheduled proactive report generation.
 
-**Phase 3 — Flow 2 + external deployment**  
-ADK-driven dynamic interview (Flow 2). Hunter Point Capital: SharePoint → validate → DealCloud workflow on the same platform. Client-facing self-serve portal. Natural language dashboard queries.
+**Phase 3 — External deployment + natural language**  
+Hunter Point Capital: SharePoint → validate → DealCloud workflow on the same platform. Client-facing self-serve portal. Natural language dashboard queries. Auto-approval path (after 50 reviewed runs).
 
 **Phase 4 — Platform extension**  
 Report Factory as billable BGO IP product. Voice collections agent reusing the same KPI catalog and review queue. Executive Scorecard self-service with Workday direct pull.
@@ -523,3 +625,4 @@ Report Factory as billable BGO IP product. Voice collections agent reusing the s
 | 5 | `client_id` naming convention — must be consistent for schema memory keys to work | Data team | Now |
 | 6 | Executive Scorecard: is Workday Excel export sufficient for Phase 1, or is API access needed from day one? | Workday admin | Phase 2 |
 | 7 | Langfuse observability — self-hosted or cloud? Required before Phase 2 launch | Platform lead | Phase 2 |
+| 8 | ADK agent: should the session interview default to ADK mode for all users, or remain opt-in via `.env`? | Product | Now |

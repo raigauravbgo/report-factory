@@ -10,12 +10,15 @@ Self-service BI tool for BGO operations teams. Upload multiple Excel/CSV files, 
 |---|---|---|
 | 1 | **Multi-File Upload** | Upload up to 10 Excel/CSV files simultaneously (≤ 50MB each) |
 | 2 | **Deep Profiling** | Auto-detects encoding, delimiter, sheet names, column types, null %, duplicates, and grain candidates |
-| 3 | **Schema Mapping** | AI classifies each column as Dimension / Measure / Date / Key with semantic tags and grain scoring — fully editable |
-| 4 | **Relationship Detection** | Fuzzy-matches column names and value sets across files to suggest join keys |
-| 5 | **AI Interview** | Side-panel chatbot — Q1 is a fixed domain question; Q2+ are generated from your column profiles |
-| 6 | **KPI Selection** | Scrollable checkable list matched against the 69-KPI catalog; add custom KPIs inline |
-| 7 | **Data Validation** | Checks for zero-value denominators, high null %, duplicate grain keys before generating the dashboard |
-| 8 | **Dashboard** | Story-driven KPI sections, trend charts, dimension breakdowns, Excel + PPTX export |
+| 3 | **Schema Mapping** | AI classifies each column as Dimension / Measure / Date / Key; user can override table type (Fact / Dimension / Unknown); Virtual Dimension builder synthesises a dimension table from shared fact columns when no Roster file is uploaded |
+| 4 | **Relationship Detection** | Fuzzy-matches column names and value sets across files to suggest join keys; user confirms in the UI |
+| 5 | **AI Interview** | **Two modes:** (a) **Flow 1** — step-by-step chatbot, Q1 fixed, Q2–Q6 dynamically generated from column profiles; (b) **ADK Agent** — conversational AI completes the full flow (data discovery → interview → KPI + dimension selection → dashboard generation) in one chat |
+| 6 | **KPI Selection** | AI-first suggestions from 87-KPI catalog; add custom KPIs inline *(bypassed in ADK agent mode)* |
+| 7 | **Dimension Selection** | Pick which categorical columns drive breakdown charts *(bypassed in ADK agent mode)* |
+| 8 | **Data Validation** | Checks for zero-value denominators, high null %, duplicate grain keys before generating the dashboard |
+| 9 | **Dashboard** | Story-driven KPI sections, trend charts, dimension breakdowns, Excel + PPTX export |
+
+**Template fast-path:** After profiling, if a saved template matches your files at ≥ 95% column overlap, a "Use Template" button skips steps 5–8 and takes you to a Review page where you can tweak config before generating.
 
 ---
 
@@ -148,7 +151,7 @@ Verify it's running: open [http://localhost:8000/health](http://localhost:8000/h
 
 The first startup automatically:
 - Runs Alembic migrations to create / update all database tables
-- Seeds all 69 BGO KPIs into the catalog
+- Seeds all 87 BGO KPIs into the catalog
 
 ---
 
@@ -211,18 +214,29 @@ Files exceeding these limits are rejected with a clear error message in the UI.
 
 ---
 
-## ADK Agent Debug UI (optional)
+## ADK Agent (AI-Guided Interview)
 
-To trace every agent step (inputs, tool calls, outputs, latency):
+When `ADK_ENABLED=true` in `.env`, the session interview page switches from the step-by-step Flow 1 chatbot to an AI agent that handles the entire pipeline in one conversation — data discovery, interview, KPI selection, dimension selection, and dashboard generation.
+
+The agent runs 9 tools: 6 legacy single-file tools + 3 new session-flow tools (`run_session_kpi_suggest`, `run_session_dimensions`, `run_session_generate`). Every LLM call and agent step is logged to the `llm_call_logs` and `agent_trace_events` tables (prompt text is never stored — only a SHA-256 hash).
+
+```env
+# Enable ADK agent mode
+ADK_ENABLED=true
+ADK_PROVIDER=openai
+ADK_MODEL=gpt-4o-mini
+```
+
+Set `ADK_ENABLED=false` (default) to use Flow 1 step-by-step. Both modes produce identical dashboards.
+
+**ADK Debug UI:**
 
 ```powershell
 cd backend
 adk web --port 8001
 ```
 
-Open [http://localhost:8001](http://localhost:8001) → select **agent** → New Session.
-
-Requires `ADK_ENABLED=true` in `.env` for the agent to be active in the main flow.
+Open [http://localhost:8001](http://localhost:8001) → select **agent** → New Session. Traces every tool call, input, output, and latency.
 
 ---
 
@@ -243,51 +257,70 @@ Without the slide master, exports use a clean blank presentation.
 ```
 report-factory/
 ├── backend/
-│   ├── agent/                    Google ADK agent + 6 tools
+│   ├── agent/report_factory_agent/   Google ADK agent + 9 tools
+│   │   ├── agent.py                  root_agent; plain conversational instructions
+│   │   └── tools/
+│   │       ├── data_discovery_from_upload.py  Primary session-flow tool (data profiling)
+│   │       ├── session_kpi_suggest.py         Multi-file KPI suggestion tool
+│   │       ├── session_dimensions.py          Multi-file dimension list tool
+│   │       ├── session_generate.py            Multi-file dashboard generation tool
+│   │       └── ... (5 legacy single-file tools)
 │   ├── api/routes/
-│   │   ├── upload.py             POST /upload, POST /upload/batch, POST /upload/{id}/schema
-│   │   ├── session.py            POST /session/{id}/relationships|interview|kpi-suggestions|validate|generate
-│   │   ├── interview.py          Legacy single-file interview + recipe endpoints
+│   │   ├── upload.py             POST /upload, POST /upload/batch, PATCH /upload/{id}/table-type
+│   │   ├── session.py            Full multi-file pipeline: relationships, interview (ADK or Flow 1),
+│   │   │                         kpi-suggestions, dimensions, virtual-dimension, validate, generate
+│   │   ├── interview.py          Legacy single-file interview
 │   │   ├── dashboard.py          GET /api/dashboard/{id}/data + exports
-│   │   ├── kpis.py               KPI catalog CRUD
+│   │   ├── kpis.py               KPI catalog CRUD + custom proposal approve/reject
+│   │   ├── templates.py          Saved templates + ≥95% column-overlap matching
 │   │   └── reports.py            Review queue endpoints
 │   ├── catalog/
-│   │   ├── kpis.json             69 BGO KPI definitions (collections, CX, sales, workforce)
+│   │   ├── kpis.json             87 BGO KPI definitions (collections, CX, sales, workforce)
 │   │   └── templates/            4 templates: client_health, wbr_qbr, exec_scorecard, kpi_spotlight
 │   ├── migrations/               Alembic schema migrations
-│   ├── models/                   SQLAlchemy ORM (Dataset, Upload, StagingTable, ReportRecipe, ...)
+│   ├── models/
+│   │   ├── dataset.py, upload.py, staging_table.py, report_recipe.py  (core pipeline)
+│   │   ├── report_template.py    Saved templates + column fingerprints
+│   │   ├── llm_call_log.py       Observability: per-LLM-call audit log (prompt hashed, never raw)
+│   │   └── agent_trace_event.py  Observability: per-step ADK pipeline trace
 │   ├── services/
-│   │   ├── ai_client.py          LLM provider router (OpenAI / Anthropic / Azure)
+│   │   ├── ai_client.py          LLM provider router (OpenAI / Anthropic / Azure); logs every call
+│   │   ├── observability.py      log_llm_call() + create_trace_event(); fire-and-forget
 │   │   ├── ai_interview.py       Flow 1 hybrid interview (Q1 fixed, Q2+ dynamic)
-│   │   ├── parser.py             CSV/Excel parser with chardet encoding + sniffer delimiter
-│   │   ├── profiler.py           Column type, semantic tag, grain score detection
-│   │   ├── schema_relationships.py  Cross-file FK / shared-key inference
-│   │   ├── kpi_suggester.py      Catalog fuzzy match + interview context boost
+│   │   ├── adk_runner.py         ADK Runner + InMemorySessionService wrapper
+│   │   ├── profiler.py           Column type, semantic tag, grain score, metric-name fix
+│   │   ├── schema_relationships.py  Cross-file FK / shared-key inference (confidence ≤ 0.95)
+│   │   ├── kpi_suggester.py      AI-first KPI matching + catalog fallback (threshold 0.55)
+│   │   ├── virtual_dimension.py  Synthetic dimension from shared fact columns
 │   │   ├── data_validator.py     Pre-dashboard zero-denom, null, dupe checks
 │   │   ├── session_generator.py  Story-driven recipe generation from session state
-│   │   ├── recipe_generator.py   Legacy single-file recipe generator
-│   │   └── compute.py            KPI formula engine, time series, breakdowns
+│   │   ├── compute.py            KPI formula engine, cross-file JOINs, DF cache (120s TTL)
+│   │   └── recipe_generator.py   LEGACY single-file recipe generator
+│   ├── tests/                    58 tests (all passing) — pytest tests/ -v
 │   ├── exporters/pptx_exporter.py
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/
 │   ├── app/
-│   │   ├── upload/page.tsx           Multi-file batch upload with per-file status
+│   │   ├── upload/page.tsx           Multi-file batch upload + template match check
 │   │   ├── session/[datasetId]/
-│   │   │   ├── schema/page.tsx       Per-file column mapping (editable roles, tags, grain)
-│   │   │   ├── interview/page.tsx    Hybrid Flow 1 chatbot with skip option
-│   │   │   └── kpis/page.tsx         Two-panel checkable KPI list with custom KPI form
-│   │   ├── dashboard/[recipeId]/     KPI cards, charts, filters, Excel + PPTX export
+│   │   │   ├── schema/page.tsx       Per-file column mapping, table-type override,
+│   │   │   │                         Virtual Dimension builder, relationship confirm
+│   │   │   ├── review/page.tsx       Template fast-path: review saved config before generating
+│   │   │   ├── interview/page.tsx    Dual-mode: ADK agent chat OR Flow 1 step-by-step chatbot
+│   │   │   ├── kpis/page.tsx         KPI checklist (Flow 1 path; bypassed in ADK mode)
+│   │   │   └── dimensions/page.tsx   Dimension selection (Flow 1 path; bypassed in ADK mode)
+│   │   ├── dashboard/[recipeId]/     Story sections, KPI cards, trend charts, filters, export
 │   │   ├── recipe/[recipeId]/        Recipe review and approval
-│   │   ├── review-queue/             Central team review interface
-│   │   └── ...legacy single-file pages
+│   │   ├── kpis/custom/page.tsx      Custom KPI proposal approve/reject UI
+│   │   └── review-queue/             Central team review interface
 │   ├── components/
 │   │   ├── UploadZone.tsx            Multi-file dropzone (up to 10 files)
-│   │   ├── ColumnTable.tsx           Column review with semantic tag + grain score columns
-│   │   └── SchemaRelationships.tsx   Cross-file relationship cards (confirm/dismiss)
+│   │   ├── ColumnTable.tsx           Column review with semantic tag + grain score
+│   │   └── SchemaRelationships.tsx   Relationship confirm: saves to sessionStorage (no list mutation)
 │   └── lib/
-│       ├── api.ts                    Typed API client (batch upload + all session endpoints)
-│       └── types.ts                  TypeScript interfaces for all pipeline stages
+│       ├── api.ts                    Typed API client for all endpoints
+│       └── types.ts                  TypeScript interfaces (InterviewResponse.is_adk_mode included)
 ├── project_plan1.md              Task tracker (per-step checkboxes)
 ├── PRD3.md                       Product requirements (single source of truth)
 └── .env                          Root environment config (backend reads this)
@@ -317,8 +350,8 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 **`LLM_PROVIDER=anthropic` but calls are still going to OpenAI**
 → Restart the backend after changing `.env`. Confirm `ANTHROPIC_API_KEY` is set and non-empty.
 
-**`ADK_ENABLED=true` but interview uses OpenAI anyway**
-→ Check the backend terminal for `WARNING ADK failed` — it auto-fell back to Flow 1. Common cause: missing `OPENAI_API_KEY` in the process environment.
+**`ADK_ENABLED=true` but interview uses Flow 1 anyway**
+→ Check the backend terminal for `SESSION_ADK_FALLBACK` or `WARNING ADK failed` log entries — the session route silently falls back to Flow 1 on any ADK exception. Common causes: missing `OPENAI_API_KEY`, ADK session not initialized, or an exception in a session tool. The UI shows the ADK "AI Agent active" badge if the first turn succeeded in ADK mode.
 
 **Schema mapping page shows "Session expired"**
 → The page reads upload IDs from `sessionStorage`. If you navigated directly to the URL without going through the upload page, go back to `/upload` and re-upload your files.

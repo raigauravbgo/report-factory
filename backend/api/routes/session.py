@@ -70,14 +70,166 @@ class InterviewTurnResponse(BaseModel):
     step_label: str
     completed: bool
     interview_result: dict | None = None
+    is_adk_mode: bool = False
 
 
 
 @router.post("/{dataset_id}/interview", response_model=InterviewTurnResponse)
 def interview_turn(dataset_id: int, body: InterviewRequest, db: Session = Depends(get_db)):
     from services.ai_interview import run_flow1
+    from core.config import settings
 
-    # Load profiles for uploaded files
+    # ── Flow 2: ADK agent (when ADK_ENABLED=true) ────────────────────────────
+    if settings.adk_enabled:
+        try:
+            import re as _re
+            from services.adk_runner import run_turn
+
+            session_id = f"session_{dataset_id}"
+
+            if not body.message:
+                # First turn: inject dataset context so the agent follows SESSION FLOW
+                # If the frontend sends an empty upload_ids list (race on first render),
+                # fall back to loading all uploads for this dataset from the DB.
+                upload_ids = body.upload_ids
+                if not upload_ids:
+                    rows = db.query(Upload.id).filter(Upload.dataset_id == dataset_id).all()
+                    upload_ids = [r[0] for r in rows]
+
+                profiles = _load_profiles(dataset_id, upload_ids, db)
+                primary_upload_id = upload_ids[0] if upload_ids else 0
+                filenames = [p.get("filename", "") for p in profiles]
+                date_cols = [
+                    c["name"] for p in profiles
+                    for c in p.get("columns", [])
+                    if c.get("suggested_role") == "date"
+                ]
+                dim_cols = [
+                    c["name"] for p in profiles
+                    for c in p.get("columns", [])
+                    if c.get("suggested_role") == "dimension"
+                ]
+                msr_cols = [
+                    c["name"] for p in profiles
+                    for c in p.get("columns", [])
+                    if c.get("suggested_role") == "measure"
+                ]
+                adk_message = (
+                    f"[DATASET UPLOADED]\n"
+                    f"dataset_id: {dataset_id}\n"
+                    f"upload_ids: {upload_ids}\n"
+                    f"files: {', '.join(filenames)}\n"
+                    f"primary_upload_id: {primary_upload_id}\n"
+                    f"likely date columns: {', '.join(date_cols[:3]) or 'none detected'}\n"
+                    f"likely dimensions: {', '.join(dim_cols[:5]) or 'none detected'}\n"
+                    f"likely measures: {', '.join(msr_cols[:5]) or 'none detected'}\n\n"
+                    "Follow the SESSION FLOW instructions."
+                )
+            else:
+                adk_message = body.message
+
+            # Record highest recipe ID before the turn so we can detect new ones after
+            from models.report_recipe import ReportRecipe
+            pre_turn_recipe = (
+                db.query(ReportRecipe.id)
+                .filter(ReportRecipe.dataset_id == dataset_id)
+                .order_by(ReportRecipe.id.desc())
+                .first()
+            )
+            pre_turn_max_id = pre_turn_recipe[0] if pre_turn_recipe else 0
+
+            from services.observability import create_trace_event as _trace
+            _trace(
+                run_id=f"session_{dataset_id}",
+                step_name="interview_turn",
+                skill_name="adk_runner.run_turn",
+                status="pending",
+                message="ADK agent processing turn",
+                evidence_json={"dataset_id": dataset_id, "first_turn": not body.message},
+            )
+
+            ai_message = run_turn(session_id, adk_message)
+
+            # Primary: check DB for a new recipe created during this turn.
+            # This is reliable even when the agent paraphrases the tool result
+            # instead of returning [DASHBOARD_READY recipe_id=N] verbatim.
+            db.expire_all()  # flush SQLAlchemy identity map so fresh rows appear
+            new_recipe = (
+                db.query(ReportRecipe.id)
+                .filter(
+                    ReportRecipe.dataset_id == dataset_id,
+                    ReportRecipe.id > pre_turn_max_id,
+                )
+                .order_by(ReportRecipe.id.desc())
+                .first()
+            )
+            recipe_id: int | None = new_recipe[0] if new_recipe else None
+
+            # Fallback: parse [DASHBOARD_READY recipe_id=N] token if agent included it
+            if recipe_id is None:
+                match = _re.search(r"\[DASHBOARD_READY recipe_id=(\d+)\]", ai_message)
+                if match:
+                    recipe_id = int(match.group(1))
+
+            completed = recipe_id is not None
+            result = {"recipe_id": recipe_id} if recipe_id else None
+            # Strip the token from display text if present
+            display = _re.sub(r"\[DASHBOARD_READY recipe_id=\d+\]\s*", "", ai_message).strip()
+            label = _STEP_LABELS[0] if _STEP_LABELS else "Step 1"
+
+            if completed:
+                logger.info(
+                    "SESSION_ADK_DONE dataset_id=%d recipe_id=%d",
+                    dataset_id, recipe_id,
+                )
+                _trace(
+                    run_id=f"session_{dataset_id}",
+                    step_name="interview_turn",
+                    skill_name="adk_runner.run_turn",
+                    status="success",
+                    confidence=1.0,
+                    message=f"ADK session complete — recipe_id={recipe_id}",
+                    evidence_json={"dataset_id": dataset_id, "recipe_id": recipe_id},
+                )
+            else:
+                logger.info("SESSION_ADK_TURN dataset_id=%d", dataset_id)
+                _trace(
+                    run_id=f"session_{dataset_id}",
+                    step_name="interview_turn",
+                    skill_name="adk_runner.run_turn",
+                    status="pending",
+                    message="ADK turn completed — awaiting further user input",
+                    evidence_json={"dataset_id": dataset_id},
+                )
+
+            return InterviewTurnResponse(
+                message=display,
+                step_index=1,
+                step_label=label,
+                completed=completed,
+                interview_result=result,
+                is_adk_mode=True,
+            )
+        except Exception as e:
+            logger.warning(
+                "SESSION_ADK_FALLBACK dataset_id=%d error=%r — falling back to Flow 1",
+                dataset_id, str(e),
+            )
+            try:
+                from services.observability import create_trace_event as _trace
+                _trace(
+                    run_id=f"session_{dataset_id}",
+                    step_name="interview_turn",
+                    skill_name="adk_runner.run_turn",
+                    status="error",
+                    message=f"ADK failed, falling back to Flow 1: {e}",
+                    evidence_json={"dataset_id": dataset_id, "error": str(e)},
+                    requires_review=True,
+                )
+            except Exception:
+                pass
+
+    # ── Flow 1: OpenAI fallback (always runs if ADK disabled or failed) ───────
     profiles = _load_profiles(dataset_id, body.upload_ids, db)
 
     response_text, step, completed, result = run_flow1(
